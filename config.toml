@@ -1,0 +1,7 @@
+# Plugin manifest for Apple's `container` CLI.
+#
+# No [servicesConfig] block => this is a CLI plugin (PluginConfig.isCLI == true).
+# Installed at <prefix>/libexec/container-plugins/compose/, so the `container`
+# CLI dispatches `container compose ...` by exec'ing bin/compose.
+abstract = "Run multi-container Compose applications (docker-compose compatibility)."
+author = "container-compose contributors"

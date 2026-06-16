@@ -130,6 +130,99 @@ struct TranslationTests {
     }
 }
 
+@Suite("Interpolation")
+struct InterpolationTests {
+    let vars = ["NAME": "web", "EMPTY": "", "TAG": "1.2.3"]
+
+    @Test("simple and braced forms")
+    func simple() throws {
+        #expect(try Interpolator.expand("$NAME:${TAG}", variables: vars) == "web:1.2.3")
+    }
+
+    @Test("escaped dollar")
+    func escaped() throws {
+        #expect(try Interpolator.expand("price $$5", variables: vars) == "price $5")
+    }
+
+    @Test("default operators")
+    func defaults() throws {
+        #expect(try Interpolator.expand("${MISSING:-fallback}", variables: vars) == "fallback")
+        #expect(try Interpolator.expand("${EMPTY:-fallback}", variables: vars) == "fallback")
+        #expect(try Interpolator.expand("${EMPTY-keep}", variables: vars) == "")  // set-but-empty
+        #expect(try Interpolator.expand("${NAME:+yes}", variables: vars) == "yes")
+        #expect(try Interpolator.expand("${MISSING:+yes}", variables: vars) == "")
+    }
+
+    @Test("required operator throws when unset")
+    func required() throws {
+        #expect(throws: ComposeError.self) {
+            _ = try Interpolator.expand("${MISSING:?must be set}", variables: vars)
+        }
+    }
+
+    @Test("unset variable becomes empty")
+    func unset() throws {
+        #expect(try Interpolator.expand("[${MISSING}]", variables: vars) == "[]")
+    }
+}
+
+@Suite("EnvFile")
+struct EnvFileTests {
+    @Test("parses keys, quotes, exports, comments")
+    func parse() {
+        let env = EnvFile.parse(
+            """
+            # comment
+            export FOO=bar
+            QUOTED="hello world"
+            SINGLE='raw $value'
+            INLINE=value # trailing
+            EMPTY=
+            """)
+        #expect(env["FOO"] == "bar")
+        #expect(env["QUOTED"] == "hello world")
+        #expect(env["SINGLE"] == "raw $value")
+        #expect(env["INLINE"] == "value")
+        #expect(env["EMPTY"] == "")
+    }
+}
+
+@Suite("Health")
+struct HealthTests {
+    @Test("duration parsing")
+    func durations() {
+        #expect(HealthChecker.seconds("30s") == 30)
+        #expect(HealthChecker.seconds("1m30s") == 90)
+        #expect(HealthChecker.seconds("500ms") == 0.5)
+        #expect(HealthChecker.seconds("2") == 2)
+        #expect(HealthChecker.seconds(nil) == nil)
+    }
+
+    @Test("test translation: CMD, CMD-SHELL, NONE, string")
+    func translation() {
+        #expect(HealthChecker.execArguments(for: .list(["CMD", "curl", "-f", "x"])) == ["curl", "-f", "x"])
+        #expect(HealthChecker.execArguments(for: .list(["CMD-SHELL", "curl -f x"])) == ["/bin/sh", "-c", "curl -f x"])
+        #expect(HealthChecker.execArguments(for: .list(["NONE"])) == nil)
+        #expect(HealthChecker.execArguments(for: .string("pg_isready")) == ["/bin/sh", "-c", "pg_isready"])
+    }
+
+    @Test("depends_on condition is read")
+    func condition() throws {
+        let yaml = """
+            services:
+              web:
+                image: x
+                depends_on:
+                  db:
+                    condition: service_healthy
+              db:
+                image: y
+            """
+        let file = try ComposeFile.parse(yaml: yaml)
+        #expect(file.services["web"]?.depends_on?.condition(for: "db") == "service_healthy")
+    }
+}
+
 /// True if `value` immediately follows `flag` somewhere in `args`.
 private func adjacent(_ args: [String], _ flag: String, _ value: String) -> Bool {
     for i in args.indices.dropLast() where args[i] == flag && args[i + 1] == value {

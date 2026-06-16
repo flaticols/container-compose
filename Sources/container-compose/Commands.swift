@@ -79,8 +79,7 @@ struct Config: AsyncParsableCommand {
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
-        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        let project = try Project.load(explicit: options.file, projectName: options.projectName, cwd: cwd)
+        let project = try options.loadProject()
         let order = try Planner.startOrder(project.file.services)
         print("project:   \(project.name)")
         print("base dir:  \(project.baseDirectory.path)")

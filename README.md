@@ -73,9 +73,25 @@ Supported and translated to `container run`/`build`/`network`/`volume`:
 | `ports` (short & long) | `--publish` |
 | `volumes` (named, bind, tmpfs; short & long) | `--volume` / `--tmpfs` |
 | `networks` (+ top-level, ipam subnet, internal) | `network create` + `--network` |
-| `depends_on` | start ordering (topological) |
+| `depends_on` (incl. `condition: service_healthy`) | start ordering + health gating (see below) |
+| `healthcheck` | run via `container exec` in a poll loop |
 | `deploy.resources.limits`, `cpus`, `mem_limit` | `--cpus`, `--memory` |
 | `working_dir`, `user`, `labels`, `cap_add/drop`, `dns`, `tmpfs`, `read_only`, `init`, `platform`, `container_name` | direct flags |
+| `${VAR}` / `${VAR:-def}` interpolation, `.env` | resolved before parsing |
+
+### Variables & `.env`
+
+`${VAR}`, `${VAR:-default}`, `${VAR-default}`, `${VAR:+alt}`, `${VAR:?error}`, and `$$`
+are expanded in the Compose file before parsing. Values come from a `.env` file next to the
+Compose file (override with `--env-file`) merged with the shell environment — **the shell
+wins**, matching Docker Compose.
+
+### Health gating
+
+`container` has no native healthcheck, so for `depends_on: { x: { condition: service_healthy } }`
+we run the dependency's own `healthcheck.test` via `container exec` in a poll loop (honoring
+`interval`, `retries`, `start_period`) and only start the dependent once it passes. If the
+dependency declares no `healthcheck`, we warn and start without gating.
 
 Resources are project-scoped: containers are named `<project>-<service>`, networks/volumes
 `<project>-<name>`, and tagged with `com.apple.container.compose.project/service` labels.
@@ -83,11 +99,11 @@ Resources are project-scoped: containers are named `<project>-<service>`, networ
 ### Not yet / approximated (warns at runtime)
 
 - **`restart`** — recorded as a label, **not enforced** (no `--restart` in `container`).
-- **`depends_on: condition: service_healthy`** — only start *order* is applied; health gating TODO.
 - **`entrypoint` as a list** — first token becomes `--entrypoint`; the rest are appended to the command.
 - **`command` as a string** — run via `/bin/sh -c` (Compose shell form).
+- **healthcheck `timeout`** — not enforced per-attempt (`container exec` has no timeout flag).
 - **`privileged`** — ignored (no equivalent in the VM-isolation model).
-- **`profiles`, `secrets`, `configs`, `extends`, variable interpolation `${VAR}`** — not implemented.
+- **`profiles`, `secrets`, `configs`, `extends`** — not implemented.
 - Multiple `-f` files / overrides, replicas/`scale` — not implemented.
 
 ## License

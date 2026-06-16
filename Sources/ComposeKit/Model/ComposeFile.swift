@@ -33,7 +33,7 @@ public struct Service: Decodable, Sendable {
     public var expose: [ComposeScalar]?
     public var volumes: [VolumeMount]?
     public var networks: NameListOrMap?
-    public var depends_on: NameListOrMap?
+    public var depends_on: DependsOn?
     public var labels: KeyValuePairs?
     public var working_dir: String?
     public var user: String?
@@ -51,6 +51,39 @@ public struct Service: Decodable, Sendable {
     public var cpus: ComposeScalar?
     public var mem_limit: String?
     public var healthcheck: Healthcheck?
+}
+
+/// `depends_on` as a plain list, or a map of `service -> { condition }`.
+public enum DependsOn: Decodable, Sendable {
+    case list([String])
+    case map([String: Dependency])
+
+    public struct Dependency: Decodable, Sendable {
+        public var condition: String?  // service_started | service_healthy | service_completed_successfully
+        public var required: Bool?
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let arr = try? c.decode([String].self) {
+            self = .list(arr)
+        } else {
+            self = .map(try c.decode([String: Dependency].self))
+        }
+    }
+
+    public var names: [String] {
+        switch self {
+        case .list(let a): return a
+        case .map(let m): return m.keys.sorted()
+        }
+    }
+
+    /// Declared start condition for a dependency (defaults to `service_started`).
+    public func condition(for name: String) -> String {
+        if case .map(let m) = self, let c = m[name]?.condition { return c }
+        return "service_started"
+    }
 }
 
 /// `build: ./dir` or a long-form build block.

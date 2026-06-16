@@ -43,6 +43,24 @@ public struct ContainerRunner: Sendable {
         return p.terminationStatus
     }
 
+    /// Run a best-effort command, discarding stdout/stderr and never throwing.
+    /// Used for idempotent cleanup (e.g. removing a possibly-absent container).
+    @discardableResult
+    public func runSilently(_ args: [String]) -> Int32 {
+        trace(args)
+        if dryRun { return 0 }
+        let p = makeProcess(args)
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do {
+            try p.run()
+        } catch {
+            return -1
+        }
+        p.waitUntilExit()
+        return p.terminationStatus
+    }
+
     /// Run, throwing if the command exits non-zero.
     public func runChecked(_ args: [String]) throws {
         let status = try run(args)

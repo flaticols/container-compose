@@ -15,7 +15,7 @@ public struct Orchestrator: Sendable {
         self.translator = Translator(
             project: project.name,
             baseDirectory: project.baseDirectory,
-            hostEnv: ProcessInfo.processInfo.environment
+            hostEnv: project.variables
         )
     }
 
@@ -40,12 +40,35 @@ public struct Orchestrator: Sendable {
             let image = try imageForService(name: name, svc: svc, forceBuild: build)
             warnUnsupported(name: name, svc: svc)
 
+            // Wait on any `depends_on: condition: service_healthy` dependencies.
+            try gateDependencies(of: name, svc, selected: selected)
+
             // Recreate semantics: remove any stale container with the same name.
             let cname = translator.containerName(service: name, declared: svc.container_name)
-            _ = try? runner.run(["delete", "--force", cname])
+            runner.runSilently(["delete", "--force", cname])
 
             info("Creating \(cname) ...")
             try runner.runChecked(translator.runArgs(service: name, svc, image: image))
+        }
+    }
+
+    /// Block on `service_healthy` dependencies that were also selected for `up`.
+    private func gateDependencies(of name: String, _ svc: Service, selected: Set<String>) throws {
+        guard let deps = svc.depends_on else { return }
+        for dep in deps.names where selected.contains(dep) {
+            guard deps.condition(for: dep) == "service_healthy" else { continue }
+            guard let depSvc = project.file.services[dep] else { continue }
+            let depContainer = translator.containerName(service: dep, declared: depSvc.container_name)
+            if let hc = depSvc.healthcheck, hc.disable != true,
+                let test = hc.test, HealthChecker.execArguments(for: test) != nil
+            {
+                info("Waiting for '\(dep)' to be healthy ...")
+                try HealthChecker(runner: runner).waitHealthy(container: depContainer, health: hc)
+            } else {
+                warn(
+                    "service '\(name)': depends_on '\(dep)' wants service_healthy but "
+                        + "'\(dep)' defines no healthcheck; starting without gating")
+            }
         }
     }
 
@@ -71,8 +94,9 @@ public struct Orchestrator: Sendable {
         for name in order {
             guard let svc = project.file.services[name] else { continue }
             let cname = translator.containerName(service: name, declared: svc.container_name)
-            _ = try? runner.run(["stop", cname])
-            _ = try? runner.run(["delete", "--force", cname])
+            info("Removing \(cname) ...")
+            runner.runSilently(["stop", cname])
+            runner.runSilently(["delete", "--force", cname])
         }
 
         // Remove project networks (default + declared).
@@ -81,12 +105,12 @@ public struct Orchestrator: Sendable {
             translator.networkName($0)
         }
         for net in networks {
-            _ = try? runner.run(["network", "delete", net])
+            runner.runSilently(["network", "delete", net])
         }
 
         if removeVolumes {
             for volName in project.file.volumes?.keys ?? Dictionary<String, VolumeSpec?>().keys {
-                _ = try? runner.run(["volume", "delete", translator.volumeName(volName)])
+                runner.runSilently(["volume", "delete", translator.volumeName(volName)])
             }
         }
     }
@@ -155,10 +179,9 @@ public struct Orchestrator: Sendable {
             if spec?.`internal` == true { args.append("--internal") }
             if let subnet = spec?.subnet { args += ["--subnet", subnet] }
             args.append(name)
-            // Best-effort: a network may already exist, or networking may be off.
-            if try runner.run(args) != 0 {
-                warn("could not create network '\(name)' (it may already exist)")
-            }
+            // Best-effort and idempotent: an existing network is silently reused
+            // (Docker-compatible). A genuine failure surfaces when `run` uses it.
+            runner.runSilently(args)
         }
     }
 
@@ -170,10 +193,8 @@ public struct Orchestrator: Sendable {
             names.insert(declared)
         }
         for name in names.sorted() {
-            let args = ["volume", "create", translator.volumeName(name)]
-            if try runner.run(args) != 0 {
-                warn("could not create volume '\(translator.volumeName(name))' (it may already exist)")
-            }
+            // Idempotent: an existing volume is reused.
+            runner.runSilently(["volume", "create", translator.volumeName(name)])
         }
     }
 
@@ -183,9 +204,6 @@ public struct Orchestrator: Sendable {
         }
         if svc.privileged == true {
             warn("service '\(name)': 'privileged' has no container equivalent and is ignored")
-        }
-        if svc.healthcheck != nil, svc.depends_on != nil {
-            warn("service '\(name)': depends_on 'condition: service_healthy' is not gated; only start order is applied")
         }
     }
 }

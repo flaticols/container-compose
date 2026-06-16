@@ -6,6 +6,10 @@ public enum ComposeError: Error, CustomStringConvertible {
     case dependencyCycle(String)
     case serviceMissingImage(String)
     case unknownService(String)
+    case interpolation(String)
+    case requiredVariable(String, String?)
+    case envFileNotFound(String)
+    case dependencyUnhealthy(String)
 
     public var description: String {
         switch self {
@@ -17,6 +21,15 @@ public enum ComposeError: Error, CustomStringConvertible {
             return "service '\(name)' has neither 'image' nor 'build'"
         case .unknownService(let name):
             return "no such service: '\(name)'"
+        case .interpolation(let message):
+            return "interpolation error: \(message)"
+        case .requiredVariable(let name, let message):
+            let detail = (message?.isEmpty == false) ? ": \(message!)" : ""
+            return "required variable '\(name)' is not set\(detail)"
+        case .envFileNotFound(let path):
+            return "env file not found: \(path)"
+        case .dependencyUnhealthy(let name):
+            return "dependency '\(name)' did not become healthy in time"
         }
     }
 }
@@ -27,6 +40,9 @@ public struct Project: Sendable {
     public let file: ComposeFile
     /// Directory of the Compose file — relative paths resolve against this.
     public let baseDirectory: URL
+    /// Variables used for `${VAR}` interpolation and `environment:` pass-through
+    /// (`.env` merged with the shell environment, shell winning).
+    public let variables: [String: String]
 
     public static let candidateFilenames = [
         "compose.yaml", "compose.yml",
@@ -58,13 +74,44 @@ public struct Project: Sendable {
         throw ComposeError.fileNotFound(candidateFilenames)
     }
 
-    public static func load(explicit: String?, projectName: String?, cwd: URL) throws -> Project {
+    public static func load(
+        explicit: String?,
+        projectName: String?,
+        cwd: URL,
+        envFile: String? = nil
+    ) throws -> Project {
         let url = try locate(explicit: explicit, cwd: cwd)
-        let yaml = try String(contentsOf: url, encoding: .utf8)
-        let file = try ComposeFile.parse(yaml: yaml)
         let base = url.deletingLastPathComponent()
+        let variables = try loadVariables(envFile: envFile, baseDirectory: base, cwd: cwd)
+
+        let rawYaml = try String(contentsOf: url, encoding: .utf8)
+        let interpolated = try Interpolator.expand(rawYaml, variables: variables)
+        let file = try ComposeFile.parse(yaml: interpolated)
+
         let name = resolveName(override: projectName, file: file, composeURL: url)
-        return Project(name: name, file: file, baseDirectory: base)
+        return Project(name: name, file: file, baseDirectory: base, variables: variables)
+    }
+
+    /// `.env` (next to the Compose file, or the explicit `--env-file`) merged
+    /// with the shell environment. The shell environment takes precedence.
+    static func loadVariables(envFile: String?, baseDirectory: URL, cwd: URL) throws -> [String: String] {
+        var variables: [String: String] = [:]
+        if let envFile {
+            let path = URL(fileURLWithPath: envFile, relativeTo: cwd).standardizedFileURL
+            guard let contents = try? String(contentsOf: path, encoding: .utf8) else {
+                throw ComposeError.envFileNotFound(path.path)
+            }
+            variables = EnvFile.parse(contents)
+        } else {
+            let defaultEnv = baseDirectory.appendingPathComponent(".env")
+            if let contents = try? String(contentsOf: defaultEnv, encoding: .utf8) {
+                variables = EnvFile.parse(contents)
+            }
+        }
+        for (key, value) in ProcessInfo.processInfo.environment {
+            variables[key] = value
+        }
+        return variables
     }
 
     /// Project name precedence: `-p` flag > top-level `name:` > parent dir name.

@@ -28,16 +28,24 @@ struct GlobalOptions: ParsableArguments {
     @Option(name: [.customShort("p"), .long], help: "Project name (defaults to the directory name).")
     var projectName: String?
 
+    @Option(name: .long, help: "Path to an env file for ${VAR} interpolation (default: .env).")
+    var envFile: String?
+
     @Flag(name: .long, help: "Print the container commands without running them.")
     var dryRun = false
 
-    @Flag(name: [.short, .long], help: "Echo each container command as it runs.")
+    // Long-only: `-v` is reserved for `down --volumes` (Docker-compatible).
+    @Flag(name: .long, help: "Echo each container command as it runs.")
     var verbose = false
+
+    func loadProject() throws -> Project {
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        return try Project.load(explicit: file, projectName: projectName, cwd: cwd, envFile: envFile)
+    }
 
     /// Build a ready-to-use Orchestrator from these options.
     func makeOrchestrator() throws -> Orchestrator {
-        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        let project = try Project.load(explicit: file, projectName: projectName, cwd: cwd)
+        let project = try loadProject()
         let runner = ContainerRunner(dryRun: dryRun, verbose: verbose)
         return Orchestrator(project: project, runner: runner)
     }

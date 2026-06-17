@@ -4,6 +4,7 @@
 
 import ArgumentParser
 import ComposeKit
+import ComposeKitContainer
 import Foundation
 
 struct Up: AsyncParsableCommand {

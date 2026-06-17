@@ -15,8 +15,9 @@ release:
 debug:
 	swift build -c debug
 
+# Unit tests live in the ComposeKit package (this repo is a thin CLI frontend).
 test:
-	swift test
+	swift test --package-path ../ComposeKit
 
 clean:
 	swift package clean
@@ -37,4 +38,4 @@ uninstall:
 	@echo "Removed $(PLUGIN_DIR)"
 
 fmt:
-	swift format --in-place --recursive Sources Tests Package.swift
+	swift format --in-place --recursive Sources Package.swift

@@ -1,0 +1,13 @@
+container-compose
+Copyright 2026 Denis Panfilov
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this software except in compliance with the License. See the LICENSE file
+for the full text, or obtain a copy at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+container-compose is a Docker Compose compatibility layer for Apple's `container`
+project (https://github.com/apple/container) and implements a subset of the
+Compose Specification (https://github.com/compose-spec/compose-spec), both of
+which are licensed under the Apache License, Version 2.0.

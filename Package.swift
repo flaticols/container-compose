@@ -23,7 +23,7 @@ let package = Package(
         // `from:` would float up to <1.0.0. Bump this string when adopting a
         // newer ComposeKit. For local changes, use
         // `swift package edit ComposeKit --path ../ComposeKit`. See PACKAGING.md.
-        .package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.1"),
+        .package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.2"),
     ],
     targets: [
         .executableTarget(

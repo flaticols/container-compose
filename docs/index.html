@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>container-compose — Docker Compose for Apple's container</title>
+<meta name="description" content="Run multi-container Compose apps on Apple's container CLI. A thin, dependency-free plugin that translates compose.yaml into native container commands.">
+<meta name="color-scheme" content="light dark">
+<meta property="og:title" content="container-compose">
+<meta property="og:description" content="Docker Compose compatibility for Apple's container.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #fbfbfd;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --line: #e8e8ed;
+    --accent: #0071e3;
+    --code-bg: #f5f5f7;
+    --code-text: #1d1d1f;
+    --radius: 18px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000;
+      --bg-alt: #0a0a0a;
+      --text: #f5f5f7;
+      --muted: #86868b;
+      --line: #1d1d1f;
+      --accent: #2997ff;
+      --code-bg: #161617;
+      --code-text: #f5f5f7;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 22px; }
+
+  /* Hero */
+  header { text-align: center; padding: 120px 0 88px; }
+  .badge {
+    display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: .02em;
+    color: var(--muted); border: 1px solid var(--line); border-radius: 980px;
+    padding: 5px 13px; margin-bottom: 26px;
+  }
+  h1 {
+    font-size: clamp(44px, 8vw, 80px); line-height: 1.05; letter-spacing: -.015em;
+    font-weight: 700; margin: 0 0 18px;
+  }
+  .tagline {
+    font-size: clamp(20px, 3.4vw, 27px); color: var(--muted); font-weight: 400;
+    max-width: 640px; margin: 0 auto 40px; letter-spacing: -.01em;
+  }
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; font-size: 17px; font-weight: 500; padding: 12px 26px;
+    border-radius: 980px; transition: opacity .2s, background .2s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: .88; text-decoration: none; }
+  .btn-ghost { color: var(--accent); border: 1px solid var(--line); }
+  .btn-ghost:hover { background: var(--bg-alt); text-decoration: none; }
+
+  /* Sections */
+  section { padding: 78px 0; border-top: 1px solid var(--line); }
+  section.alt { background: var(--bg-alt); }
+  h2 {
+    font-size: clamp(28px, 4.4vw, 40px); letter-spacing: -.01em; font-weight: 700;
+    margin: 0 0 12px; text-align: center;
+  }
+  .sub { color: var(--muted); text-align: center; max-width: 600px; margin: 0 auto 44px; font-size: 19px; }
+
+  /* Code */
+  pre {
+    background: var(--code-bg); color: var(--code-text); border-radius: var(--radius);
+    padding: 24px 26px; overflow-x: auto; margin: 0 auto; max-width: 720px;
+    font-size: 14.5px; line-height: 1.7;
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre .c { color: var(--muted); }
+  code {
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code-bg); padding: 2px 7px; border-radius: 6px; font-size: .9em;
+  }
+
+  /* Command grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .card {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px;
+    background: var(--bg);
+  }
+  .card .cmd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .card .desc { color: var(--muted); font-size: 14.5px; }
+
+  /* Feature chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 760px; margin: 0 auto; }
+  .chip {
+    border: 1px solid var(--line); border-radius: 980px; padding: 8px 16px;
+    font-size: 14.5px; color: var(--text); background: var(--bg);
+  }
+
+  footer { padding: 56px 0; text-align: center; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+  footer a { color: var(--muted); }
+  footer .links { margin-bottom: 14px; display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">Apache-2.0 · macOS 13+ · Apple Silicon</span>
+    <h1>container&#8209;compose</h1>
+    <p class="tagline">Docker Compose, on Apple&rsquo;s <code>container</code>. Run your <code>compose.yaml</code> with one command.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/flaticols/container-compose/releases/latest">Download .pkg</a>
+      <a class="btn btn-ghost" href="https://github.com/flaticols/container-compose">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>One layer. No magic.</h2>
+    <p class="sub">A thin CLI plugin that parses a Compose file and orchestrates the stable public <code>container</code> CLI — no private or XPC APIs. Install it once and run <code>container compose up</code>.</p>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <h2>Quick start</h2>
+    <p class="sub">Install as a <code>container</code> plugin, then run it from any directory with a <code>compose.yaml</code>.</p>
+    <pre><span class="c"># install the plugin</span>
+make
+sudo make install
+container system stop &amp;&amp; container system start   <span class="c"># reload plugins</span>
+
+<span class="c"># from a directory with compose.yaml</span>
+container compose up            <span class="c"># create networks/volumes, start in order</span>
+container compose ps
+container compose logs web -f
+container compose down -v       <span class="c"># stop + remove, including named volumes</span></pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Commands</h2>
+    <p class="sub">The familiar Compose surface, mapped to native <code>container</code> operations.</p>
+    <div class="grid">
+      <div class="card"><div class="cmd">up</div><div class="desc">Create networks &amp; volumes, start services in dependency order.</div></div>
+      <div class="card"><div class="cmd">down</div><div class="desc">Stop and remove containers, networks, and named volumes.</div></div>
+      <div class="card"><div class="cmd">ps</div><div class="desc">List the project&rsquo;s containers.</div></div>
+      <div class="card"><div class="cmd">logs</div><div class="desc">Show or follow container logs.</div></div>
+      <div class="card"><div class="cmd">exec</div><div class="desc">Run a command in a running service container.</div></div>
+      <div class="card"><div class="cmd">pull</div><div class="desc">Pre-fetch images for the project&rsquo;s services.</div></div>
+      <div class="card"><div class="cmd">stop / start</div><div class="desc">Stop or start containers without recreating them.</div></div>
+      <div class="card"><div class="cmd">restart</div><div class="desc">Stop then start the selected services.</div></div>
+      <div class="card"><div class="cmd">config</div><div class="desc">Validate and print the resolved project plan.</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <h2>Compose, translated</h2>
+    <p class="sub">Supported and mapped to <code>container run</code>/<code>build</code>/<code>network</code>/<code>volume</code>.</p>
+    <div class="chips">
+      <span class="chip">image &amp; build</span>
+      <span class="chip">command / entrypoint</span>
+      <span class="chip">environment &amp; env_file</span>
+      <span class="chip">ports</span>
+      <span class="chip">volumes &amp; tmpfs</span>
+      <span class="chip">networks &amp; IPAM</span>
+      <span class="chip">depends_on + health gating</span>
+      <span class="chip">healthcheck</span>
+      <span class="chip">profiles</span>
+      <span class="chip">extends &amp; include</span>
+      <span class="chip">configs &amp; secrets</span>
+      <span class="chip">deploy limits (cpus / memory)</span>
+      <span class="chip">${VAR} &amp; .env interpolation</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/flaticols/container-compose">GitHub</a>
+      <a href="https://github.com/flaticols/container-compose/releases/latest">Releases</a>
+      <a href="https://github.com/flaticols/ComposeKit">ComposeKit</a>
+      <a href="https://github.com/apple/container">Apple container</a>
+    </div>
+    container-compose · Apache-2.0 · not affiliated with Apple or Docker.
+  </div>
+</footer>
+
+</body>
+</html>

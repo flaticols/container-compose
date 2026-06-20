@@ -1,0 +1,34 @@
+# Health gating — start a service only once its dependency is healthy.
+#
+# `container` has no native healthcheck, so container-compose runs the
+# dependency's own healthcheck.test via `container exec` in a poll loop and
+# holds the dependent until it passes.
+#
+# Demonstrates: healthcheck, depends_on { condition: service_healthy },
+# command (shell form), and reaching another service by name.
+#
+#   container compose up
+#   # watch the logs: `client` only runs after `cache` reports healthy.
+services:
+  cache:
+    image: redis:alpine
+    # A stable name so other services can resolve it on the project network.
+    container_name: cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]   # returns PONG → exit 0 → healthy
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 1s
+
+  client:
+    image: redis:alpine
+    depends_on:
+      cache:
+        condition: service_healthy
+    # A string command runs via `/bin/sh -c`, so write the pipeline directly
+    # (no explicit `sh -c` wrapper — that would nest a second shell).
+    command: >
+      redis-cli -h cache set greeting 'hello from the client' &&
+      echo 'cache was healthy before I started; value =' &&
+      redis-cli -h cache get greeting

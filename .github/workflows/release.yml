@@ -27,6 +27,9 @@ permissions:
 jobs:
   package:
     runs-on: macos-26
+    # Safety net: a misconfigured signing step that blocks on a keychain prompt
+    # would otherwise hang until the 6h default — cap it well below that.
+    timeout-minutes: 30
     # macos-26 is arm64 (Apple Silicon). Apple's `container` is Apple-Silicon-only,
     # so the plugin binary must be built on arm64.
     env:
@@ -91,6 +94,12 @@ jobs:
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # productsign resolves the signing identity against the DEFAULT keychain,
+          # not just the search list that codesign honors. Without this, productsign
+          # can't reach the Installer key non-interactively and hangs forever on a
+          # GUI auth prompt the headless runner never answers. Make the temp
+          # keychain the default so both tools sign without prompting.
+          security default-keychain -s "$KEYCHAIN"
 
           security import "$RUNNER_TEMP/app.p12"       -k "$KEYCHAIN" -P "$APP_CERT_P12_PASSWORD"       -T /usr/bin/codesign
           security import "$RUNNER_TEMP/installer.p12" -k "$KEYCHAIN" -P "$INSTALLER_CERT_P12_PASSWORD" -T /usr/bin/productsign

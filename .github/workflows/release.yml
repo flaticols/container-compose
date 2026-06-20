@@ -74,8 +74,23 @@ jobs:
             echo "::warning::Signing secrets absent — producing an UNSIGNED .pkg."
           fi
 
+      - name: Stamp version from the tag
+        run: |
+          set -euo pipefail
+          printf 'let containerComposeVersion = "%s"\n' "${{ steps.meta.outputs.version }}" \
+            > Sources/container-compose/Version.swift
+          cat Sources/container-compose/Version.swift
+
       - name: Build release binary
         run: swift build -c release
+
+      - name: Verify binary reports the tag version
+        run: |
+          set -euo pipefail
+          got="$("$(swift build -c release --show-bin-path)/container-compose" --version)"
+          want="${{ steps.meta.outputs.version }}"
+          echo "binary --version: $got (want: $want)"
+          [ "$got" = "$want" ] || { echo "::error::version mismatch: $got != $want"; exit 1; }
 
       - name: Import signing certificates
         if: steps.signing.outputs.enabled == 'true'

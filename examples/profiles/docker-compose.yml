@@ -1,0 +1,29 @@
+# Profiles — keep optional services out of the default `up`.
+#
+# Services with a `profiles:` list only start when one of their profiles is
+# active (via --profile or COMPOSE_PROFILES). Services without `profiles:`
+# always start.
+#
+# Demonstrates: profiles, and the exec workflow for a debug sidecar.
+#
+#   container compose up                      # starts web + api only
+#   container compose config                  # preview: debug is hidden
+#   container compose --profile debug up      # also starts the debug box
+#   container compose --profile debug exec debug sh   # poke around the network
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+
+  api:
+    image: traefik/whoami
+    ports:
+      - "8081:80"
+
+  # Only present when the `debug` profile is active. A tiny box you can
+  # `exec` into to inspect the running project (DNS, connectivity, etc.).
+  debug:
+    image: busybox
+    profiles: ["debug"]
+    command: ["sleep", "infinity"]

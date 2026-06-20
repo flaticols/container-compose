@@ -1,0 +1,14 @@
+# Quickstart — the smallest useful Compose file.
+#
+# A single nginx serving a static page from a read-only bind mount.
+# Demonstrates: image, ports, bind volumes (read-only).
+#
+#   container compose up           # then open http://localhost:8080
+#   container compose down
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro

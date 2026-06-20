@@ -1,0 +1,79 @@
+# Full stack — the "complex" example, all on lightweight images.
+#
+# A Caddy reverse proxy in front of a static site and a tiny API, with a
+# Redis cache on a separate, private backend network.
+#
+# Demonstrates: multiple networks (segmentation), reverse proxy + service
+# DNS, depends_on with BOTH service_healthy and service_started, healthchecks,
+# a named volume, ${VAR}/.env interpolation, deploy resource limits, labels.
+#
+#   container compose up           # open http://localhost:8080  and  /api/
+#   container compose ps
+#   container compose down -v      # also removes the named volume
+name: full-stack
+
+services:
+  proxy:
+    image: caddy:${CADDY_TAG:-alpine}
+    container_name: proxy
+    ports:
+      - "${PROXY_PORT:-8080}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      web:
+        condition: service_healthy    # gated on web's healthcheck below
+      api:
+        condition: service_started    # whoami has no shell → can't healthcheck
+    networks: [frontend]
+    labels:
+      app.tier: edge
+
+  web:
+    image: nginx:${NGINX_TAG:-alpine}
+    container_name: web
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost/"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks: [frontend]
+    labels:
+      app.tier: web
+
+  api:
+    image: traefik/whoami
+    container_name: api
+    networks: [frontend, backend]     # bridges the edge and the backend tier
+    labels:
+      app.tier: api
+
+  cache:
+    image: redis:alpine
+    container_name: cache
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - cache-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    networks: [backend]               # private: reachable by api, not the proxy
+    labels:
+      app.tier: cache
+
+networks:
+  frontend:
+  backend:
+    internal: true                    # isolated backend tier (no outbound)
+
+volumes:
+  cache-data:

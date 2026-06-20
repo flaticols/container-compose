@@ -1,0 +1,12 @@
+# Caddy reverse proxy.
+#   /api/*  -> the whoami API (prefix stripped)
+#   /       -> the static site
+# Services are reached by their container_name on the `frontend` network.
+:80 {
+	handle_path /api/* {
+		reverse_proxy api:80
+	}
+	handle {
+		reverse_proxy web:80
+	}
+}

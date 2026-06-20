@@ -101,13 +101,25 @@ jobs:
           # keychain the default so both tools sign without prompting.
           security default-keychain -s "$KEYCHAIN"
 
-          security import "$RUNNER_TEMP/app.p12"       -k "$KEYCHAIN" -P "$APP_CERT_P12_PASSWORD"       -T /usr/bin/codesign
-          security import "$RUNNER_TEMP/installer.p12" -k "$KEYCHAIN" -P "$INSTALLER_CERT_P12_PASSWORD" -T /usr/bin/productsign
+          # Import with -A (allow ANY tool to use the key without prompting). The
+          # narrower `-T /usr/bin/<tool>` ACL was enough for codesign but
+          # productsign still blocked on an auth prompt — its access to the
+          # Installer key isn't covered the same way — so it hung forever on the
+          # headless runner. -A plus the partition list below makes both sign
+          # non-interactively.
+          security import "$RUNNER_TEMP/app.p12"       -k "$KEYCHAIN" -P "$APP_CERT_P12_PASSWORD"       -A
+          security import "$RUNNER_TEMP/installer.p12" -k "$KEYCHAIN" -P "$INSTALLER_CERT_P12_PASSWORD" -A
 
-          # Allow codesign/productsign to use the keys without an interactive prompt.
+          # Grant non-interactive access to the imported keys (the partition list
+          # is the real gate on modern macOS; -A alone is not enough).
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
+
+          # Diagnostics: prove both signing identities landed with distinct keys.
+          # Expect exactly 2 valid identities (Developer ID Application + Installer).
+          echo "=== identities in build keychain ==="
+          security find-identity -v "$KEYCHAIN"
 
       - name: Codesign binary (hardened runtime)
         if: steps.signing.outputs.enabled == 'true'
@@ -141,8 +153,24 @@ jobs:
       - name: Sign .pkg (productsign)
         if: steps.signing.outputs.enabled == 'true'
         run: |
-          set -euo pipefail
-          productsign --sign "$INSTALLER_IDENTITY" dist/component.pkg "${{ steps.meta.outputs.pkg }}"
+          set -uo pipefail
+          PKG="${{ steps.meta.outputs.pkg }}"
+          # productsign blocks forever on securityd if it can't reach the Installer
+          # key non-interactively. Run it in the background and, if it's still alive
+          # after 60s, capture a stack sample (network vs keychain) and fail fast
+          # instead of hanging to the job timeout.
+          productsign --sign "$INSTALLER_IDENTITY" dist/component.pkg "$PKG" &
+          pid=$!
+          for _ in $(seq 1 60); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::productsign still blocked after 60s — sampling then failing"
+            sample "$pid" 3 2>&1 | sed -n '1,80p' || true
+            kill -9 "$pid" 2>/dev/null || true
+            exit 1
+          fi
+          wait "$pid"; rc=$?
+          [ "$rc" -eq 0 ] || { echo "::error::productsign exited $rc"; exit "$rc"; }
+          echo "productsign OK"
 
       - name: Finalize unsigned .pkg
         if: steps.signing.outputs.enabled != 'true'

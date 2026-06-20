@@ -104,6 +104,9 @@
   }
   .card .cmd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 15px; font-weight: 600; margin-bottom: 6px; }
   .card .desc { color: var(--muted); font-size: 14.5px; }
+  a.card { color: inherit; text-decoration: none; transition: border-color .2s; display: block; }
+  a.card:hover { border-color: var(--accent); text-decoration: none; }
+  a.card .cmd { color: var(--accent); }
 
   /* Feature chips */
   .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 760px; margin: 0 auto; }
@@ -195,12 +198,34 @@ container compose down -v       <span class="c"># stop + remove, including named
   </div>
 </section>
 
+<section>
+  <div class="wrap">
+    <h2>Ecosystem</h2>
+    <p class="sub">Built on a reusable Swift engine — and there&rsquo;s an IDE plugin too.</p>
+    <div class="grid">
+      <a class="card" href="https://github.com/flaticols/ComposeKit">
+        <div class="cmd">ComposeKit&nbsp;&rarr;</div>
+        <div class="desc">The runtime-agnostic Swift engine that parses, interpolates, and plans Compose projects. Reusable on its own.</div>
+      </a>
+      <a class="card" href="https://plugins.jetbrains.com/plugin/32292-apple-container">
+        <div class="cmd">JetBrains plugin&nbsp;&rarr;</div>
+        <div class="desc">Apple Container support inside IntelliJ-based IDEs, on the JetBrains Marketplace.</div>
+      </a>
+      <a class="card" href="https://github.com/apple/container">
+        <div class="cmd">Apple container&nbsp;&rarr;</div>
+        <div class="desc">The underlying CLI this plugin orchestrates — lightweight Linux containers on macOS.</div>
+      </a>
+    </div>
+  </div>
+</section>
+
 <footer>
   <div class="wrap">
     <div class="links">
       <a href="https://github.com/flaticols/container-compose">GitHub</a>
       <a href="https://github.com/flaticols/container-compose/releases/latest">Releases</a>
       <a href="https://github.com/flaticols/ComposeKit">ComposeKit</a>
+      <a href="https://plugins.jetbrains.com/plugin/32292-apple-container">JetBrains plugin</a>
       <a href="https://github.com/apple/container">Apple container</a>
     </div>
     container-compose · Apache-2.0 · not affiliated with Apple or Docker.

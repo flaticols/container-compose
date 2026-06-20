@@ -54,11 +54,17 @@ Then, from a directory containing a `compose.yaml`:
 container compose up            # create networks/volumes, start services in order
 container compose ps
 container compose logs web -f
+container compose exec -it web sh   # run a command in a running service container
+container compose pull          # pre-fetch images for all services
+container compose stop          # stop containers without removing them
+container compose start         # start existing containers without recreating
+container compose restart       # stop then start (no native --restart in container)
 container compose down -v       # stop+remove containers, networks, and named volumes
 ```
 
 `--dry-run` prints the `container` commands without running them; `--verbose` echoes them as
-they run. Override the CLI with `CONTAINER_CLI=/path/to/container`.
+they run. `--profile <name>` (repeatable, merged with `COMPOSE_PROFILES`) activates
+profile-gated services. Override the CLI with `CONTAINER_CLI=/path/to/container`.
 
 ## Compatibility
 
@@ -72,7 +78,10 @@ Supported and translated to `container run`/`build`/`network`/`volume`:
 | `ports` (short & long) | `--publish` |
 | `volumes` (named, bind, tmpfs; short & long) | `--volume` / `--tmpfs` |
 | `networks` (+ top-level, ipam subnet, internal) | `network create` + `--network` |
-| `depends_on` (incl. `condition: service_healthy`) | start ordering + health gating (see below) |
+| `depends_on` (incl. `condition: service_healthy` / `service_completed_successfully`) | start ordering + health/completion gating (see below) |
+| `profiles` | service gating via `--profile` / `COMPOSE_PROFILES` |
+| `extends`, `include` | flattened into the model at load time |
+| `configs`, `secrets` (file-based) | provisioned and mounted into containers |
 | `healthcheck` | run via `container exec` in a poll loop |
 | `deploy.resources.limits`, `cpus`, `mem_limit` | `--cpus`, `--memory` |
 | `working_dir`, `user`, `labels`, `cap_add/drop`, `dns`, `tmpfs`, `read_only`, `init`, `platform`, `container_name` | direct flags |
@@ -97,12 +106,11 @@ Resources are project-scoped: containers are named `<project>-<service>`, networ
 
 ### Not yet / approximated (warns at runtime)
 
-- **`restart`** — recorded as a label, **not enforced** (no `--restart` in `container`).
+- **`restart:` policy** — recorded as a label, **not enforced** (no `--restart` in `container`). The `restart` *command* (stop+start) works.
 - **`entrypoint` as a list** — first token becomes `--entrypoint`; the rest are appended to the command.
 - **`command` as a string** — run via `/bin/sh -c` (Compose shell form).
 - **healthcheck `timeout`** — not enforced per-attempt (`container exec` has no timeout flag).
 - **`privileged`** — ignored (no equivalent in the VM-isolation model).
-- **`profiles`, `secrets`, `configs`, `extends`** — not implemented.
 - Multiple `-f` files / overrides, replicas/`scale` — not implemented.
 
 ## License

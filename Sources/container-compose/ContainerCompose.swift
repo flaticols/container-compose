@@ -16,7 +16,10 @@ struct ContainerCompose: AsyncParsableCommand {
         commandName: "compose",
         abstract: "Run multi-container Compose applications with Apple's container.",
         version: "0.1.0",
-        subcommands: [Up.self, Down.self, Ps.self, Logs.self, Config.self],
+        subcommands: [
+            Up.self, Down.self, Ps.self, Logs.self, Config.self,
+            Exec.self, Pull.self, Stop.self, Start.self, Restart.self,
+        ],
         defaultSubcommand: Up.self
     )
 }
@@ -32,6 +35,9 @@ struct GlobalOptions: ParsableArguments {
     @Option(name: .long, help: "Path to an env file for ${VAR} interpolation (default: .env).")
     var envFile: String?
 
+    @Option(name: .long, help: "Enable a profile (repeatable; merged with COMPOSE_PROFILES).")
+    var profile: [String] = []
+
     @Flag(name: .long, help: "Print the container commands without running them.")
     var dryRun = false
 
@@ -41,7 +47,8 @@ struct GlobalOptions: ParsableArguments {
 
     func loadProject() throws -> Project {
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        return try Project.load(explicit: file, projectName: projectName, cwd: cwd, envFile: envFile)
+        return try Project.load(
+            explicit: file, projectName: projectName, cwd: cwd, envFile: envFile, profiles: profile)
     }
 
     /// Build a ready-to-use Orchestrator from these options.

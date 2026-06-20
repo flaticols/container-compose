@@ -73,6 +73,92 @@ struct Logs: AsyncParsableCommand {
     }
 }
 
+struct Exec: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Run a command in a running service container.")
+
+    @OptionGroup var options: GlobalOptions
+
+    @Flag(name: [.customShort("i"), .long], help: "Keep stdin open (interactive).")
+    var interactive = false
+
+    @Flag(name: [.customShort("t"), .long], help: "Allocate a pseudo-TTY.")
+    var tty = false
+
+    @Argument(help: "Service whose container to exec into.")
+    var service: String
+
+    @Argument(parsing: .captureForPassthrough, help: "Command and arguments to run.")
+    var command: [String]
+
+    func run() async throws {
+        let orchestrator = try options.makeOrchestrator()
+        let status = try orchestrator.exec(
+            service: service, command: command, interactive: interactive, tty: tty)
+        if status != 0 { throw ExitCode(status) }
+    }
+}
+
+struct Pull: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Pull images for the project's services.")
+
+    @OptionGroup var options: GlobalOptions
+
+    @Argument(help: "Limit to these services (default: all).")
+    var services: [String] = []
+
+    func run() async throws {
+        let orchestrator = try options.makeOrchestrator()
+        try orchestrator.pull(only: services)
+    }
+}
+
+struct Stop: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Stop service containers without removing them.")
+
+    @OptionGroup var options: GlobalOptions
+
+    @Argument(help: "Limit to these services (default: all).")
+    var services: [String] = []
+
+    func run() async throws {
+        let orchestrator = try options.makeOrchestrator()
+        try orchestrator.stop(only: services)
+    }
+}
+
+struct Start: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Start existing service containers without recreating them.")
+
+    @OptionGroup var options: GlobalOptions
+
+    @Argument(help: "Limit to these services (default: all).")
+    var services: [String] = []
+
+    func run() async throws {
+        let orchestrator = try options.makeOrchestrator()
+        try orchestrator.start(only: services)
+    }
+}
+
+struct Restart: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Restart service containers (stop then start).")
+
+    @OptionGroup var options: GlobalOptions
+
+    @Argument(help: "Limit to these services (default: all).")
+    var services: [String] = []
+
+    func run() async throws {
+        let orchestrator = try options.makeOrchestrator()
+        try orchestrator.restart(only: services)
+    }
+}
+
 struct Config: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Validate and show the resolved project plan.")
@@ -81,10 +167,18 @@ struct Config: AsyncParsableCommand {
 
     func run() async throws {
         let project = try options.loadProject()
-        let order = try Planner.startOrder(project.file.services)
+        // Mirror `up`: only services enabled by the active profiles (plus their
+        // dependencies) are part of the plan, so the preview must not list
+        // profile-gated services that `up` would skip.
+        let enabled = project.enabledServices()
+        let services = project.file.services.filter { enabled.contains($0.key) }
+        let order = try Planner.startOrder(services)
         print("project:   \(project.name)")
         print("base dir:  \(project.baseDirectory.path)")
-        print("services:  \(project.file.services.keys.sorted().joined(separator: ", "))")
+        if !project.activeProfiles.isEmpty {
+            print("profiles:  \(project.activeProfiles.sorted().joined(separator: ", "))")
+        }
+        print("services:  \(services.keys.sorted().joined(separator: ", "))")
         print("start order:")
         for (i, name) in order.enumerated() {
             let deps = project.file.services[name]?.depends_on?.names ?? []

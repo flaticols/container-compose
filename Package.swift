@@ -19,10 +19,11 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
         // ComposeKit lives in its own repo, split into a runtime-agnostic core
         // (ComposeKit) and the `container` runtime layer (ComposeKitContainer).
-        // Pinned to an exact prerelease tag — `from:` ranges skip prereleases, so
-        // bump this string when adopting a newer ComposeKit. For local changes,
-        // use `swift package edit ComposeKit --path ../ComposeKit`. See PACKAGING.md.
-        .package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.1-beta1"),
+        // Pinned to an exact tag — for a 0.0.x line every patch may break, and
+        // `from:` would float up to <1.0.0. Bump this string when adopting a
+        // newer ComposeKit. For local changes, use
+        // `swift package edit ComposeKit --path ../ComposeKit`. See PACKAGING.md.
+        .package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.1"),
     ],
     targets: [
         .executableTarget(

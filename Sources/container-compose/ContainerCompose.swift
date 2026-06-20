@@ -15,7 +15,7 @@ struct ContainerCompose: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "compose",
         abstract: "Run multi-container Compose applications with Apple's container.",
-        version: "0.1.0",
+        version: containerComposeVersion,
         subcommands: [
             Up.self, Down.self, Ps.self, Logs.self, Config.self,
             Exec.self, Pull.self, Stop.self, Start.self, Restart.self,

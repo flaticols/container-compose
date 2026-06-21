@@ -1,0 +1,23 @@
+# Advanced build fields. no_cache/labels/secrets translate to container build
+# flags; ssh/network/cache_from are decoded but warned (no container build flag).
+name: buildadv
+services:
+  app:
+    image: app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+      no_cache: true
+      labels:
+        - "com.example.tier=web"
+      secrets:
+        - build_token
+      ssh:
+        - default
+      network: host
+      cache_from:
+        - app:cache
+
+secrets:
+  build_token:
+    file: ./secrets/api_key.txt

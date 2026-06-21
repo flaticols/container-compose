@@ -1,6 +1,6 @@
-# Builds container-compose. The library/unit tests now live in the ComposeKit
-# repo (github.com/flaticols/ComposeKit) and run in its own CI. ComposeKit is
-# resolved over its Git URL (see Package.swift), so no sibling checkout needed.
+# Builds and tests container-compose. The runtime layer (ContainerComposeKit)
+# and its tests live in this repo; the Compose spec parser and its tests live in
+# the ComposeKit repo. ComposeKit is resolved over its Git URL (see Package.swift).
 
 name: CI
 
@@ -18,5 +18,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Build
         run: swift build -v
+      - name: Test
+        run: swift test
       - name: Smoke test (CLI responds)
         run: swift run container-compose --help

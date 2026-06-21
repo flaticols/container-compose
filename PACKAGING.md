@@ -11,15 +11,21 @@ ArgumentParser frontend that depends on it.
 
 ## 1. The ComposeKit dependency
 
-`Package.swift` depends on ComposeKit over its Git URL, tracking `main` until the
-first tagged release:
+ComposeKit is the runtime-agnostic Compose **parser** (parsing, interpolation,
+profiles, planning, include/extends). The `container` **runtime layer**
+(translation + orchestration) lives in this repo as the `ContainerComposeKit`
+target — it is no longer a `ComposeKitContainer` product of ComposeKit.
+
+`Package.swift` pins ComposeKit to an exact tag:
 
 ```swift
-.package(url: "https://github.com/flaticols/ComposeKit.git", branch: "main"),
+.package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.3"),
 ```
 
-`Package.resolved` is **committed** (see `.gitignore`) so CI and release builds
-pin the exact ComposeKit revision instead of floating to `main`'s HEAD.
+`0.0.3` is the first ComposeKit release after the runtime layer was extracted
+into this repo (it removed the `ComposeKitContainer` product). `Package.resolved`
+is **committed** (see `.gitignore`) so CI and release builds pin the exact
+ComposeKit revision.
 
 **Local development against a ComposeKit working copy** — don't edit the line
 above; override it with an editable checkout:

@@ -7,7 +7,7 @@
 
 import ArgumentParser
 import ComposeKit
-import ComposeKitContainer
+import ContainerComposeKit
 import Foundation
 
 @main

@@ -144,17 +144,19 @@
 <section class="alt">
   <div class="wrap">
     <h2>Quick start</h2>
-    <p class="sub">Install as a <code>container</code> plugin, then run it from any directory with a <code>compose.yaml</code>.</p>
-    <pre><span class="c"># install the plugin</span>
-make
-sudo make install
+    <p class="sub">Install the signed <code>.pkg</code>, then run it from any directory with a <code>compose.yaml</code>.</p>
+    <pre><span class="c"># install: download the .pkg from Releases, then</span>
+sudo installer -pkg ~/Downloads/container-compose-*.pkg -target /
 container system stop &amp;&amp; container system start   <span class="c"># reload plugins</span>
 
 <span class="c"># from a directory with compose.yaml</span>
 container compose up            <span class="c"># create networks/volumes, start in order</span>
+container compose up --wait      <span class="c"># ...and wait until healthy</span>
 container compose ps
-container compose logs web -f
-container compose down -v       <span class="c"># stop + remove, including named volumes</span></pre>
+container compose logs web --follow
+container compose down -v       <span class="c"># stop + remove, including named volumes</span>
+
+container compose update        <span class="c"># self-update to the latest release</span></pre>
   </div>
 </section>
 
@@ -163,15 +165,17 @@ container compose down -v       <span class="c"># stop + remove, including named
     <h2>Commands</h2>
     <p class="sub">The familiar Compose surface, mapped to native <code>container</code> operations.</p>
     <div class="grid">
-      <div class="card"><div class="cmd">up</div><div class="desc">Create networks &amp; volumes, start services in dependency order.</div></div>
+      <div class="card"><div class="cmd">up</div><div class="desc">Create networks &amp; volumes, start services in dependency order. <code>--wait</code> blocks until healthy.</div></div>
       <div class="card"><div class="cmd">down</div><div class="desc">Stop and remove containers, networks, and named volumes.</div></div>
       <div class="card"><div class="cmd">ps</div><div class="desc">List the project&rsquo;s containers.</div></div>
-      <div class="card"><div class="cmd">logs</div><div class="desc">Show or follow container logs.</div></div>
-      <div class="card"><div class="cmd">exec</div><div class="desc">Run a command in a running service container.</div></div>
+      <div class="card"><div class="cmd">logs</div><div class="desc">Show or follow container logs; <code>--tail N</code> limits the output.</div></div>
+      <div class="card"><div class="cmd">exec</div><div class="desc">Run a command in a running service container (<code>-it</code>, <code>--workdir/--user/--env</code>).</div></div>
       <div class="card"><div class="cmd">pull</div><div class="desc">Pre-fetch images for the project&rsquo;s services.</div></div>
       <div class="card"><div class="cmd">stop / start</div><div class="desc">Stop or start containers without recreating them.</div></div>
       <div class="card"><div class="cmd">restart</div><div class="desc">Stop then start the selected services.</div></div>
+      <div class="card"><div class="cmd">kill</div><div class="desc">Send a signal (default KILL) to the project&rsquo;s containers.</div></div>
       <div class="card"><div class="cmd">config</div><div class="desc">Validate and print the resolved project plan.</div></div>
+      <div class="card"><div class="cmd">update</div><div class="desc">Self-update to the latest signed release.</div></div>
     </div>
   </div>
 </section>

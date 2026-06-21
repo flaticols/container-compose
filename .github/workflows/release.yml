@@ -7,8 +7,13 @@ name: Release
 #   * If the signing secrets are PRESENT the binary is codesigned (hardened
 #     runtime), the .pkg is productsigned, notarized and stapled — no workflow
 #     change needed, it upgrades automatically once you add the secrets.
-#   * On a version tag (v1.2.3) the .pkg is attached to the GitHub Release.
-#     On a manual run it's uploaded as a downloadable workflow artifact.
+#   * The GitHub Release is created as a DRAFT, the .pkg is attached while the
+#     draft is still mutable, then it is published. This is compatible with the
+#     repo's immutable-releases ruleset (a published release can't be edited, so
+#     assets must be attached before publishing).
+#   * Trigger by pushing a version tag (v1.2.3), OR by running this workflow
+#     manually with a `version` input (which creates the tag + release without a
+#     tag push). A manual run with no version just uploads the .pkg as an artifact.
 #
 # See PACKAGING.md for the secrets and the signed/unsigned matrix.
 
@@ -18,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version for the .pkg (optional; defaults to 0.0.0-<sha>)"
+        description: "Version to release (e.g. 0.0.6). Empty = build artifact only, no release."
         required: false
 
 permissions:
@@ -49,8 +54,11 @@ jobs:
             TAG="$GITHUB_REF_NAME"; VERSION="${TAG#v}"; RELEASE=true
           else
             VERSION="${{ github.event.inputs.version }}"
-            [ -z "$VERSION" ] && VERSION="0.0.0-${GITHUB_SHA::7}"
-            TAG=""; RELEASE=false
+            if [ -n "$VERSION" ]; then
+              TAG="v$VERSION"; RELEASE=true   # manual run with a version: create tag + release
+            else
+              VERSION="0.0.0-${GITHUB_SHA::7}"; TAG=""; RELEASE=false
+            fi
           fi
           PKG="dist/container-compose-${VERSION}.pkg"
           {
@@ -221,12 +229,26 @@ jobs:
           path: ${{ steps.meta.outputs.pkg }}
           if-no-files-found: error
 
-      - name: Publish to GitHub Release
+      # Create the release as a DRAFT and attach the .pkg while it is still
+      # mutable. Immutable releases reject asset uploads once published, so the
+      # asset must be present before the publish step below flips the draft off.
+      # On a manual run (no tag pushed) softprops creates the tag at this commit.
+      - name: Attach .pkg to a draft GitHub Release
         if: steps.meta.outputs.release == 'true'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: ${{ steps.meta.outputs.pkg }}
           fail_on_unmatched_files: true
+          draft: true
           # Tags with a prerelease suffix (v0.0.1-beta1) are marked pre-release.
           prerelease: ${{ contains(steps.meta.outputs.tag, '-') }}
+
+      # Publish the draft (now carrying the .pkg). Under immutable releases this
+      # is the moment the release locks — with its asset already attached.
+      - name: Publish the release
+        if: steps.meta.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ steps.meta.outputs.tag }}" --draft=false

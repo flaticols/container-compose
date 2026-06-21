@@ -50,5 +50,10 @@ let package = Package(
             path: "Tests/ContainerComposeKitTests",
             resources: [.copy("Fixtures")]
         ),
+        .testTarget(
+            name: "container-composeTests",
+            dependencies: ["container-compose"],
+            path: "Tests/container-composeTests"
+        ),
     ]
 )

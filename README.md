@@ -72,6 +72,17 @@ container compose down -v       # stop+remove containers, networks, and named vo
 they run. `--profile <name>` (repeatable, merged with `COMPOSE_PROFILES`) activates
 profile-gated services. Override the CLI with `CONTAINER_CLI=/path/to/container`.
 
+### Updating
+
+```sh
+container compose update          # download + verify + install the latest release
+container compose update --check  # just report whether a newer version exists
+```
+
+`update` fetches the latest GitHub Release, downloads the signed + notarized `.pkg`,
+verifies its signature (`pkgutil --check-signature`), and installs it (prompts for
+admin, since the plugin lives under `/usr/local`). Works no matter how it was installed.
+
 ## Compatibility
 
 Supported and translated to `container run`/`build`/`network`/`volume`:

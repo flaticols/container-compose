@@ -19,18 +19,13 @@ target — it is no longer a `ComposeKitContainer` product of ComposeKit.
 `Package.swift` pins ComposeKit to an exact tag:
 
 ```swift
-.package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.2"),
+.package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.3"),
 ```
 
-> **Pending bump:** the runtime layer was extracted from ComposeKit, so this repo
-> now requires the ComposeKit release that removed the `ComposeKitContainer`
-> product (the next tag after `0.0.2`, e.g. `0.0.3`). Until that tag exists,
-> build against a local checkout with `swift package edit ComposeKit --path
-> ../ComposeKit`. Once tagged, bump the line above to that version and
-> `swift package resolve`.
-
-`Package.resolved` is **committed** (see `.gitignore`) so CI and release builds
-pin the exact ComposeKit revision.
+`0.0.3` is the first ComposeKit release after the runtime layer was extracted
+into this repo (it removed the `ComposeKitContainer` product). `Package.resolved`
+is **committed** (see `.gitignore`) so CI and release builds pin the exact
+ComposeKit revision.
 
 **Local development against a ComposeKit working copy** — don't edit the line
 above; override it with an editable checkout:

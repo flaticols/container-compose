@@ -23,14 +23,20 @@ public surface and sidesteps the in-tree plugin property-passthrough blockers
 
 ## Architecture
 
-The Compose engine lives in a separate package,
-[`ComposeKit`](https://github.com/flaticols/ComposeKit) (parsing, planning,
-translation, orchestration — no CLI deps). This repo is the ArgumentParser
-frontend that depends on it and ships as the `container` plugin.
+The Compose **parser** lives in a separate package,
+[`ComposeKit`](https://github.com/flaticols/ComposeKit) (parsing, interpolation,
+profiles, planning, include/extends — no runtime or CLI deps). The `container`
+**runtime layer** (translation + orchestration) lives in this repo as the
+`ContainerComposeKit` target, and the executable is the ArgumentParser frontend.
 
 ```
 Sources/
-  container-compose/          # executable (ArgumentParser) — depends on ComposeKit
+  ContainerComposeKit/        # runtime layer — maps the model onto `container`
+    ContainerTranslator.swift # Service -> `container run/build` args
+    ContainerRunner.swift     # subprocess wrapper around `container`
+    Orchestrator.swift        # up/down/ps/logs/exec/pull/stop/start/restart
+    HealthChecker.swift       # healthcheck polling + service_healthy gating
+  container-compose/          # executable (ArgumentParser)
     ContainerCompose.swift    # root command + global options
     Commands.swift            # up, down, ps, logs, config
 config.toml                   # plugin manifest (installed alongside the binary)

@@ -1,0 +1,32 @@
+# Fields that ComposeKit translates onto `container run`: ulimits, shm_size,
+# dns options, runtime, tty/stdin, and deploy resource limits.
+name: resources
+services:
+  worker:
+    image: app:latest
+    tty: true
+    stdin_open: true
+    runtime: runc
+    shm_size: 128m
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 1024
+        hard: 524288
+    dns:
+      - 1.1.1.1
+    dns_search:
+      - corp.example.com
+    dns_opt:
+      - timeout:2
+      - attempts:3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 512m
+    networks:
+      - default
+
+networks:
+  default:

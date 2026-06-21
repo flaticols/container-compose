@@ -1,0 +1,64 @@
+# A typical local-dev stack: web + db + cache + one-shot migration, wired with
+# depends_on conditions and a healthcheck-gated database.
+name: localdev
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: app
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+
+  cache:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - backend
+
+  migrate:
+    image: app:latest
+    command: ["./migrate", "up"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://app:secret@db:5432/app
+    networks:
+      - backend
+
+  web:
+    image: app:latest
+    command: ["./serve"]
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://app:secret@db:5432/app
+      REDIS_URL: redis://cache:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - backend
+      - frontend
+
+networks:
+  backend:
+  frontend:
+
+volumes:
+  dbdata:

@@ -5,3 +5,4 @@
 # Package.resolved IS committed: this is an executable that ships release
 # artifacts, and it tracks ComposeKit's `main` branch — committing the resolved
 # file pins the exact ComposeKit revision so CI/release builds are reproducible.
+Packages/

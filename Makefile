@@ -15,9 +15,10 @@ release:
 debug:
 	swift build -c debug
 
-# Unit tests live in the ComposeKit package (this repo is a thin CLI frontend).
+# Runtime-layer tests (ContainerComposeKit) live here; spec-parser tests live in
+# the ComposeKit package.
 test:
-	swift test --package-path ../ComposeKit
+	swift test
 
 clean:
 	swift package clean

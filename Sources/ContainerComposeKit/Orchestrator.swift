@@ -148,9 +148,10 @@ public struct Orchestrator: Sendable {
 
     /// Resolve every config/secret source referenced by a selected service to a
     /// host file path: `file:` is resolved against the project dir;
-    /// `content:`/`environment:` are materialized to a temp file. `external:`,
-    /// undefined, and source-less entries are warned and skipped, as are
-    /// uid/gid/mode (bind mounts can't enforce them).
+    /// `content:`/`environment:` are materialized to a temp file (honoring `mode`).
+    /// `external:`, undefined, and source-less entries are warned and skipped;
+    /// `uid`/`gid` are warned (need root), and `mode` on a `file:` source is
+    /// warned (the file isn't ours to chmod).
     private func resolveFileObjects(selected: Set<String>) -> ContainerTranslator.ResolvedFileObjects {
         var configs: [String: String] = [:]
         var secrets: [String: String] = [:]
@@ -162,13 +163,17 @@ public struct Orchestrator: Sendable {
             into out: inout [String: String]
         ) {
             var referenced = Set<String>()
+            var modeFor: [String: String] = [:]  // source -> requested mode (last wins)
             for name in selected {
                 guard let svc = project.file.services[name] else { continue }
                 for ref in refsFor(svc) ?? [] {
                     referenced.insert(ref.source)
-                    if case .long(let l) = ref, l.uid != nil || l.gid != nil || l.mode != nil {
-                        warn("service '\(name)': \(kind) '\(ref.source)' uid/gid/mode "
-                            + "are not enforced by container")
+                    if case .long(let l) = ref {
+                        if l.uid != nil || l.gid != nil {
+                            warn("service '\(name)': \(kind) '\(ref.source)' uid/gid "
+                                + "are not enforced by container")
+                        }
+                        if let mode = l.mode?.stringValue { modeFor[ref.source] = mode }
                     }
                 }
             }
@@ -177,15 +182,23 @@ public struct Orchestrator: Sendable {
                     warn("\(kind) '\(source)' is referenced but not defined; skipping")
                     continue
                 }
+                let mode = modeFor[source]
                 if spec.external?.isExternal == true {
                     warn("\(kind) '\(source)' is external; container cannot resolve it, skipping")
                 } else if let file = spec.file {
                     out[source] = translator.resolvePath(file)
+                    if mode != nil {
+                        warn("\(kind) '\(source)': mode is not applied to a file: source")
+                    }
                 } else if let content = spec.content {
-                    if let p = materialize(kind: kind, name: source, content: content) { out[source] = p }
+                    if let p = materialize(kind: kind, name: source, content: content, mode: mode) {
+                        out[source] = p
+                    }
                 } else if let envName = spec.environment {
                     let value = project.variables[envName] ?? ""
-                    if let p = materialize(kind: kind, name: source, content: value) { out[source] = p }
+                    if let p = materialize(kind: kind, name: source, content: value, mode: mode) {
+                        out[source] = p
+                    }
                 } else {
                     warn("\(kind) '\(source)' has no file/content/environment source; skipping")
                 }
@@ -201,9 +214,12 @@ public struct Orchestrator: Sendable {
     }
 
     /// Write inline `content:`/`environment:` source data to a temp file and
-    /// return its path. During a dry run nothing is written (the path is still
-    /// returned so the planned mount is visible).
-    private func materialize(kind: String, name: String, content: String) -> String? {
+    /// return its path, applying `mode` (octal, e.g. `0440`) when given. During a
+    /// dry run nothing is written (the path is still returned so the planned mount
+    /// is visible).
+    private func materialize(kind: String, name: String, content: String, mode: String? = nil)
+        -> String?
+    {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("composekit-\(project.name)", isDirectory: true)
             .appendingPathComponent("\(kind)s", isDirectory: true)
@@ -212,11 +228,25 @@ public struct Orchestrator: Sendable {
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try content.write(to: url, atomically: true, encoding: .utf8)
+            if let mode, let bits = Self.parseMode(mode) {
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: NSNumber(value: bits)], ofItemAtPath: url.path)
+            }
             return url.path
         } catch {
             warn("\(kind) '\(name)': failed to materialize content (\(error)); skipping")
             return nil
         }
+    }
+
+    /// Parse a Compose file `mode` to permission bits. Accepts `0440`/`0o440`
+    /// (octal) and a plain decimal whose value is already the mode bits (e.g.
+    /// YAML may decode `0440` to the integer `288`, which is `0o440`).
+    static func parseMode(_ raw: String) -> Int? {
+        let s = raw.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("0o") || s.hasPrefix("0O") { return Int(s.dropFirst(2), radix: 8) }
+        if s.count > 1, s.hasPrefix("0") { return Int(s, radix: 8) }
+        return Int(s)
     }
 
     private func imageForService(

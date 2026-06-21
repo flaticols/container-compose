@@ -430,3 +430,15 @@ private func adjacent(_ args: [String], _ flag: String, _ value: String) -> Bool
     }
     return false
 }
+
+@Suite("Config/secret mode")
+struct ModeTests {
+    @Test("parseMode handles octal, 0o, and decimal-as-bits")
+    func parse() {
+        #expect(Orchestrator.parseMode("0440") == 0o440)
+        #expect(Orchestrator.parseMode("0o644") == 0o644)
+        #expect(Orchestrator.parseMode("288") == 0o440)  // YAML may decode 0440 -> 288
+        #expect(Orchestrator.parseMode("0") == 0)
+        #expect(Orchestrator.parseMode("xyz") == nil)
+    }
+}

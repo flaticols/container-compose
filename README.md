@@ -4,10 +4,8 @@ A Docker Compose compatibility layer for [Apple's `container`](https://github.co
 
 Parses a Compose file and orchestrates the **stable public `container` CLI** — no
 internal/XPC APIs. Ships as a `container` CLI plugin (so you run `container compose up`)
-and as a standalone `container-compose` binary.
-
-> Status: early MVP. Covers the common Compose fields; see [Compatibility](#compatibility)
-> for what is approximated or unsupported.
+and as a standalone `container-compose` binary. See [Compatibility](#compatibility) for
+the supported Compose fields and what is approximated.
 
 ## Why this design
 
@@ -38,43 +36,61 @@ Sources/
     HealthChecker.swift       # healthcheck polling + service_healthy gating
   container-compose/          # executable (ArgumentParser)
     ContainerCompose.swift    # root command + global options
-    Commands.swift            # up, down, ps, logs, config
+    Commands.swift            # up/down/ps/logs/exec/pull/stop/start/restart/kill/config
+    Update.swift              # self-update command
 config.toml                   # plugin manifest (installed alongside the binary)
 ```
 
 > Signed `.pkg` releases are built on CI — see [PACKAGING.md](PACKAGING.md) for
 > the release runbook and required secrets.
 
-## Build & install
+## Install
+
+**Signed installer (recommended).** Download the latest `.pkg` from
+[Releases](https://github.com/flaticols/container-compose/releases/latest) and open it,
+or from the terminal:
 
 ```sh
-make             # swift build -c release
-make test
-sudo make install        # -> /usr/local/libexec/container-plugins/compose/
+gh release download -R flaticols/container-compose --pattern '*.pkg'
+sudo installer -pkg container-compose-*.pkg -target /
 container system stop && container system start   # reload plugins
 ```
 
-Then, from a directory containing a `compose.yaml`:
+**From source** (needs the Swift toolchain):
 
 ```sh
-container compose up            # create networks/volumes, start services in order
-container compose up --wait     # ...and block until healthchecked services are healthy
-container compose ps
-container compose logs web --follow   # -n/--tail N limits to the last N lines
-container compose exec -it web sh     # also -w/--workdir, -u/--user, -e/--env KEY=VALUE
-container compose pull          # pre-fetch images for all services
-container compose stop          # stop containers without removing them
-container compose start         # start existing containers without recreating
-container compose restart       # stop then start (no native --restart in container)
-container compose kill -s SIGTERM     # send a signal (default KILL) to containers
-container compose down -v       # stop+remove containers, networks, and named volumes
+make                 # swift build -c release
+sudo make install    # -> /usr/local/libexec/container-plugins/compose/
+container system stop && container system start
 ```
 
-`--dry-run` prints the `container` commands without running them; `--verbose` echoes them as
-they run. `--profile <name>` (repeatable, merged with `COMPOSE_PROFILES`) activates
-profile-gated services. Override the CLI with `CONTAINER_CLI=/path/to/container`.
+Verify with `container compose --version`.
 
-### Updating
+## Commands
+
+Run from a directory containing a `compose.yaml`:
+
+| Command | What it does |
+|---|---|
+| `up [--build] [--wait] [services…]` | Create networks/volumes and start services in dependency order; `--wait` blocks until healthchecked services are healthy |
+| `down [-v/--volumes]` | Stop + remove containers and project networks (and named volumes with `-v`) |
+| `ps [-a/--all]` | List the project's containers |
+| `logs [-f/--follow] [-n/--tail N] [services…]` | Show container logs |
+| `exec [-i] [-t] [-w DIR] [-u USER] [-e K=V]… <service> <cmd…>` | Run a command in a running service container |
+| `pull [services…]` | Pre-fetch images (skips build-only services) |
+| `stop [services…]` | Stop containers without removing them |
+| `start [services…]` | Start existing containers without recreating |
+| `restart [services…]` | Stop then start (no native `--restart` in `container`) |
+| `kill [-s/--signal SIG] [services…]` | Send a signal (default KILL) |
+| `config` | Validate and print the resolved project plan |
+| `update [--check]` | Self-update to the latest release |
+
+Global flags (any command): `-f/--file <path>`, `-p/--project-name <name>`,
+`--env-file <path>`, `--profile <name>` (repeatable, merged with `COMPOSE_PROFILES`),
+`--dry-run` (print the `container` commands without running them), `--verbose` (echo each
+command). Override the CLI with `CONTAINER_CLI=/path/to/container`.
+
+## Updating
 
 ```sh
 container compose update          # download + verify + install the latest release
@@ -82,8 +98,21 @@ container compose update --check  # just report whether a newer version exists
 ```
 
 `update` fetches the latest GitHub Release, downloads the signed + notarized `.pkg`,
-verifies its signature (`pkgutil --check-signature`), and installs it (prompts for
-admin, since the plugin lives under `/usr/local`). Works no matter how it was installed.
+verifies its signature (`pkgutil --check-signature`), and installs it (prompts for admin,
+since the plugin lives under `/usr/local`). Works no matter how it was installed.
+
+## Uninstall
+
+```sh
+# from-source installs:
+sudo make uninstall
+
+# .pkg installs:
+sudo rm -rf /usr/local/libexec/container-plugins/compose
+sudo pkgutil --forget dev.flaticols.container-compose
+
+container system stop && container system start   # reload plugins
+```
 
 ## Compatibility
 

@@ -52,7 +52,7 @@ public struct Orchestrator: Sendable {
     ///     dependencies); empty means every profile-enabled service.
     /// - Throws: `ComposeError` for unknown services, dependency cycles, or a
     ///   dependency that fails to become healthy or complete successfully.
-    public func up(build: Bool, only services: [String]) throws {
+    public func up(build: Bool, only services: [String], wait: Bool = false) throws {
         try validate(services)
         let selected = project.enabledServices(explicit: services)
         try ensureNetworks()
@@ -91,6 +91,23 @@ public struct Orchestrator: Sendable {
                 try runner.runChecked(
                     translator.runArgs(service: name, svc, image: image, files: resolved))
             }
+        }
+
+        if wait { try waitUntilHealthy(order: order, oneShot: oneShot) }
+    }
+
+    /// Block until every started service that defines a healthcheck reports
+    /// healthy. Services without a healthcheck are considered ready once created;
+    /// one-shot (`service_completed_successfully`) services already ran to exit.
+    private func waitUntilHealthy(order: [String], oneShot: Set<String>) throws {
+        for name in order where !oneShot.contains(name) {
+            guard let svc = project.file.services[name], let hc = svc.healthcheck,
+                hc.disable != true, let test = hc.test,
+                HealthChecker.execArguments(for: test) != nil
+            else { continue }
+            let cname = translator.containerName(service: name, declared: svc.container_name)
+            info("Waiting for '\(name)' to be healthy ...")
+            try HealthChecker(runner: runner).waitHealthy(container: cname, health: hc)
         }
     }
 
@@ -288,7 +305,7 @@ public struct Orchestrator: Sendable {
     ///     one service this tails them sequentially; pass a single service to
     ///     stream live.
     ///   - services: limit to these services; empty means all.
-    public func logs(follow: Bool, only services: [String]) throws {
+    public func logs(follow: Bool, tail: Int? = nil, only services: [String]) throws {
         let selected = try select(services).sorted()
         if follow && selected.count > 1 {
             warn("--follow with multiple services tails them sequentially; pass one service to stream live")
@@ -298,6 +315,7 @@ public struct Orchestrator: Sendable {
             let cname = translator.containerName(service: name, declared: svc.container_name)
             var args = ["logs"]
             if follow { args.append("--follow") }
+            if let tail { args += ["-n", String(tail)] }
             args.append(cname)
             _ = try? runner.run(args)
         }
@@ -313,11 +331,15 @@ public struct Orchestrator: Sendable {
     ///   - command: the command and arguments to run.
     ///   - interactive: keep stdin open (`-i`).
     ///   - tty: allocate a TTY (`-t`).
+    ///   - workdir: working directory inside the container (`--workdir`).
+    ///   - user: user to run as, `name|uid[:gid]` (`--user`).
+    ///   - env: extra `KEY=VALUE` environment entries (`--env`, repeatable).
     /// - Returns: the command's exit status.
     /// - Throws: `ComposeError.unknownService` if the service is undeclared.
     @discardableResult
     public func exec(
-        service: String, command: [String], interactive: Bool = false, tty: Bool = false
+        service: String, command: [String], interactive: Bool = false, tty: Bool = false,
+        workdir: String? = nil, user: String? = nil, env: [String] = []
     ) throws -> Int32 {
         try validate([service])
         let svc = project.file.services[service]
@@ -325,6 +347,9 @@ public struct Orchestrator: Sendable {
         var args = ["exec"]
         if interactive { args.append("--interactive") }
         if tty { args.append("--tty") }
+        if let workdir { args += ["--workdir", workdir] }
+        if let user { args += ["--user", user] }
+        for entry in env { args += ["--env", entry] }
         args.append(cname)
         args += command
         return try runner.run(args)
@@ -377,6 +402,23 @@ public struct Orchestrator: Sendable {
     public func restart(only services: [String]) throws {
         try stop(only: services)
         try start(only: services)
+    }
+
+    /// Send a signal (default KILL) to the selected services' containers, in
+    /// reverse dependency order. Best-effort, like ``stop(only:)``.
+    ///
+    /// - Parameter signal: the signal to send (e.g. `SIGTERM`); `nil` uses the
+    ///   `container` default (KILL).
+    public func kill(only services: [String], signal: String? = nil) throws {
+        for name in try ordered(services, reversed: true) {
+            guard let svc = project.file.services[name] else { continue }
+            let cname = translator.containerName(service: name, declared: svc.container_name)
+            info("Killing \(cname) ...")
+            var args = ["kill"]
+            if let signal { args += ["--signal", signal] }
+            args.append(cname)
+            runner.runSilently(args)
+        }
     }
 
     // MARK: - shared helpers

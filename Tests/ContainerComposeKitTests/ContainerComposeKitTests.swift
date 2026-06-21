@@ -337,6 +337,38 @@ struct LifecycleTests {
         #expect(lines.contains("network delete proj-default"))
         #expect(!lines.contains { $0.hasPrefix("volume delete") })
     }
+
+    @Test("kill sends the signal in reverse order")
+    func kill() throws {
+        let lines = try capture("kill") { try $0.kill(only: [], signal: "SIGTERM") }
+        let app = lines.firstIndex(of: "kill --signal SIGTERM proj-app")
+        let db = lines.firstIndex(of: "kill --signal SIGTERM proj-db")
+        #expect(app != nil && db != nil && app! < db!)
+    }
+
+    @Test("kill with no signal omits --signal (container default KILL)")
+    func killDefault() throws {
+        let lines = try capture("killd") { try $0.kill(only: ["db"]) }
+        #expect(lines.contains("kill proj-db"))
+    }
+
+    @Test("logs --tail emits -n")
+    func logsTail() throws {
+        let lines = try capture("logs") { try $0.logs(follow: false, tail: 25, only: ["db"]) }
+        #expect(lines.contains("logs -n 25 proj-db"))
+    }
+
+    @Test("exec forwards --workdir/--user/--env")
+    func execFlags() throws {
+        let lines = try capture("exec") {
+            _ = try $0.exec(
+                service: "db", command: ["sh"], interactive: true, tty: true,
+                workdir: "/app", user: "1000", env: ["A=b"])
+        }
+        #expect(
+            lines.contains(
+                "exec --interactive --tty --workdir /app --user 1000 --env A=b proj-db sh"))
+    }
 }
 
 @Suite("Port publishing")

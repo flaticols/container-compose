@@ -58,13 +58,15 @@ Then, from a directory containing a `compose.yaml`:
 
 ```sh
 container compose up            # create networks/volumes, start services in order
+container compose up --wait     # ...and block until healthchecked services are healthy
 container compose ps
-container compose logs web -f
-container compose exec -it web sh   # run a command in a running service container
+container compose logs web --follow   # -n/--tail N limits to the last N lines
+container compose exec -it web sh     # also -w/--workdir, -u/--user, -e/--env KEY=VALUE
 container compose pull          # pre-fetch images for all services
 container compose stop          # stop containers without removing them
 container compose start         # start existing containers without recreating
 container compose restart       # stop then start (no native --restart in container)
+container compose kill -s SIGTERM     # send a signal (default KILL) to containers
 container compose down -v       # stop+remove containers, networks, and named volumes
 ```
 

@@ -16,12 +16,15 @@ struct Up: AsyncParsableCommand {
     @Flag(name: .long, help: "Build images before starting (even if an image is present).")
     var build = false
 
+    @Flag(name: .long, help: "Wait until services with a healthcheck report healthy.")
+    var wait = false
+
     @Argument(help: "Limit to these services (default: all).")
     var services: [String] = []
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.up(build: build, only: services)
+        try orchestrator.up(build: build, only: services, wait: wait)
     }
 }
 
@@ -61,15 +64,19 @@ struct Logs: AsyncParsableCommand {
 
     @OptionGroup var options: GlobalOptions
 
-    @Flag(name: [.short, .long], help: "Follow log output.")
+    // Long-only: `-f` is the global `--file` short, so `--follow` can't claim it.
+    @Flag(name: .long, help: "Follow log output.")
     var follow = false
+
+    @Option(name: [.customShort("n"), .long], help: "Show only the last N lines.")
+    var tail: Int?
 
     @Argument(help: "Limit to these services (default: all).")
     var services: [String] = []
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.logs(follow: follow, only: services)
+        try orchestrator.logs(follow: follow, tail: tail, only: services)
     }
 }
 
@@ -85,6 +92,15 @@ struct Exec: AsyncParsableCommand {
     @Flag(name: [.customShort("t"), .long], help: "Allocate a pseudo-TTY.")
     var tty = false
 
+    @Option(name: [.customShort("w"), .long], help: "Working directory inside the container.")
+    var workdir: String?
+
+    @Option(name: [.customShort("u"), .long], help: "User to run as (name|uid[:gid]).")
+    var user: String?
+
+    @Option(name: [.customShort("e"), .long], help: "Set an env var KEY=VALUE (repeatable).")
+    var env: [String] = []
+
     @Argument(help: "Service whose container to exec into.")
     var service: String
 
@@ -94,7 +110,8 @@ struct Exec: AsyncParsableCommand {
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
         let status = try orchestrator.exec(
-            service: service, command: command, interactive: interactive, tty: tty)
+            service: service, command: command, interactive: interactive, tty: tty,
+            workdir: workdir, user: user, env: env)
         if status != 0 { throw ExitCode(status) }
     }
 }
@@ -156,6 +173,24 @@ struct Restart: AsyncParsableCommand {
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
         try orchestrator.restart(only: services)
+    }
+}
+
+struct Kill: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Force-stop service containers by sending a signal (default KILL).")
+
+    @OptionGroup var options: GlobalOptions
+
+    @Option(name: [.customShort("s"), .long], help: "Signal to send (e.g. SIGTERM; default KILL).")
+    var signal: String?
+
+    @Argument(help: "Limit to these services (default: all).")
+    var services: [String] = []
+
+    func run() async throws {
+        let orchestrator = try options.makeOrchestrator()
+        try orchestrator.kill(only: services, signal: signal)
     }
 }
 

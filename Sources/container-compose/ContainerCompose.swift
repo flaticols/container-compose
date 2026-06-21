@@ -19,6 +19,7 @@ struct ContainerCompose: AsyncParsableCommand {
         subcommands: [
             Up.self, Down.self, Ps.self, Logs.self, Config.self,
             Exec.self, Pull.self, Stop.self, Start.self, Restart.self,
+            Update.self,
         ],
         defaultSubcommand: Up.self
     )

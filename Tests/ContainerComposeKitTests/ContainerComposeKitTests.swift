@@ -186,7 +186,7 @@ struct FileObjectTests {
 @Suite("Completed-successfully gating")
 struct OneShotTests {
     @Test("dry-run up completes for a stack using service_completed_successfully")
-    func dryRunUp() throws {
+    func dryRunUp() async throws {
         // local-dev.yaml gates web on migrate (service_completed_successfully);
         // a dry run exercises the one-shot detection + attached-run branch.
         let url = Bundle.module.url(
@@ -194,11 +194,11 @@ struct OneShotTests {
         let project = try Project.load(
             explicit: url.path, projectName: nil, cwd: url.deletingLastPathComponent())
         let orch = Orchestrator(project: project, runner: ContainerRunner(dryRun: true))
-        try orch.up(build: false, only: [])
+        try await orch.up(build: false, only: [])
     }
 
     @Test("a failing one-shot dependency aborts up")
-    func failingOneShotAborts() throws {
+    func failingOneShotAborts() async throws {
         // Shim `container` that always exits non-zero; the one-shot `a` then
         // fails and `up` must throw dependencyFailed before `b` is created.
         let shim = FileManager.default.temporaryDirectory
@@ -226,7 +226,7 @@ struct OneShotTests {
         let orch = Orchestrator(project: project, runner: runner)
 
         do {
-            try orch.up(build: false, only: [])
+            try await orch.up(build: false, only: [])
             Issue.record("expected up to throw dependencyFailed")
         } catch let ComposeError.dependencyFailed(name, status) {
             #expect(name == "a")
@@ -256,7 +256,9 @@ struct BuildTests {
 struct LifecycleTests {
     /// Run `body` against an Orchestrator whose `container` is a shim that records
     /// each invocation, and return the recorded command lines.
-    private func capture(_ tag: String, _ body: (Orchestrator) throws -> Void) throws -> [String] {
+    private func capture(
+        _ tag: String, _ body: (Orchestrator) async throws -> Void
+    ) async throws -> [String] {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ck-\(tag)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -281,37 +283,38 @@ struct LifecycleTests {
         let project = Project(
             name: "proj", file: try ComposeFile.parse(yaml: yaml),
             baseDirectory: URL(fileURLWithPath: "/tmp"), variables: [:])
-        try body(Orchestrator(project: project, runner: runner))
+        try await body(Orchestrator(project: project, runner: runner))
         let text = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
         return text.split(separator: "\n").map(String.init)
     }
 
     @Test("exec passes -i/-t and the command into the service container")
-    func exec() throws {
-        let lines = try capture("exec") {
-            _ = try $0.exec(service: "db", command: ["psql", "-U", "app"], interactive: true, tty: true)
+    func exec() async throws {
+        let lines = try await capture("exec") {
+            _ = try await $0.exec(
+                service: "db", command: ["psql", "-U", "app"], interactive: true, tty: true)
         }
         #expect(lines.contains("exec --interactive --tty proj-db psql -U app"))
     }
 
     @Test("pull fetches image services and skips build-only ones")
-    func pull() throws {
-        let lines = try capture("pull") { try $0.pull(only: []) }
+    func pull() async throws {
+        let lines = try await capture("pull") { try await $0.pull(only: []) }
         #expect(lines.contains("image pull postgres:16"))
         #expect(!lines.contains { $0.contains("proj-app") })  // app builds locally
     }
 
     @Test("stop runs in reverse dependency order")
-    func stop() throws {
-        let lines = try capture("stop") { try $0.stop(only: []) }
+    func stop() async throws {
+        let lines = try await capture("stop") { try await $0.stop(only: []) }
         let app = lines.firstIndex(of: "stop proj-app")
         let db = lines.firstIndex(of: "stop proj-db")
         #expect(app != nil && db != nil && app! < db!)  // dependent stops first
     }
 
     @Test("restart stops everything before starting anything")
-    func restart() throws {
-        let lines = try capture("restart") { try $0.restart(only: []) }
+    func restart() async throws {
+        let lines = try await capture("restart") { try await $0.restart(only: []) }
         #expect(lines.contains("stop proj-db"))
         #expect(lines.contains("start proj-db"))
         let lastStop = lines.lastIndex { $0.hasPrefix("stop ") }!
@@ -320,8 +323,8 @@ struct LifecycleTests {
     }
 
     @Test("down stops in reverse order, removes the network, keeps volumes")
-    func down() throws {
-        let lines = try capture("down") { try $0.down(removeVolumes: false) }
+    func down() async throws {
+        let lines = try await capture("down") { try await $0.down(removeVolumes: false) }
         let app = lines.firstIndex { $0.hasPrefix("stop proj-app") }
         let db = lines.firstIndex { $0.hasPrefix("stop proj-db") }
         #expect(app != nil && db != nil && app! < db!)  // dependent stops first
@@ -330,29 +333,31 @@ struct LifecycleTests {
     }
 
     @Test("kill sends the signal in reverse order")
-    func kill() throws {
-        let lines = try capture("kill") { try $0.kill(only: [], signal: "SIGTERM") }
+    func kill() async throws {
+        let lines = try await capture("kill") { try await $0.kill(only: [], signal: "SIGTERM") }
         let app = lines.firstIndex(of: "kill --signal SIGTERM proj-app")
         let db = lines.firstIndex(of: "kill --signal SIGTERM proj-db")
         #expect(app != nil && db != nil && app! < db!)
     }
 
     @Test("kill with no signal omits --signal (container default KILL)")
-    func killDefault() throws {
-        let lines = try capture("killd") { try $0.kill(only: ["db"]) }
+    func killDefault() async throws {
+        let lines = try await capture("killd") { try await $0.kill(only: ["db"]) }
         #expect(lines.contains("kill proj-db"))
     }
 
     @Test("logs --tail emits -n")
-    func logsTail() throws {
-        let lines = try capture("logs") { try $0.logs(follow: false, tail: 25, only: ["db"]) }
+    func logsTail() async throws {
+        let lines = try await capture("logs") {
+            try await $0.logs(follow: false, tail: 25, only: ["db"])
+        }
         #expect(lines.contains("logs -n 25 proj-db"))
     }
 
     @Test("exec forwards --workdir/--user/--env")
-    func execFlags() throws {
-        let lines = try capture("exec") {
-            _ = try $0.exec(
+    func execFlags() async throws {
+        let lines = try await capture("exec") {
+            _ = try await $0.exec(
                 service: "db", command: ["sh"], interactive: true, tty: true,
                 workdir: "/app", user: "1000", env: ["A=b"])
         }
@@ -399,18 +404,22 @@ struct OrchestratorErrorTests {
     }
 
     @Test("up on a service with neither image nor build throws serviceMissingImage")
-    func missingImage() throws {
+    func missingImage() async throws {
         let orch = Orchestrator(
             project: try project("services:\n  x: {}\n"), runner: ContainerRunner(dryRun: true))
-        #expect(throws: ComposeError.self) { try orch.up(build: false, only: []) }
+        await #expect(throws: ComposeError.self) {
+            try await orch.up(build: false, only: [])
+        }
     }
 
     @Test("exec on an unknown service throws unknownService")
-    func unknownExec() throws {
+    func unknownExec() async throws {
         let orch = Orchestrator(
             project: try project("services:\n  a:\n    image: x\n"),
             runner: ContainerRunner(dryRun: true))
-        #expect(throws: ComposeError.self) { _ = try orch.exec(service: "nope", command: ["sh"]) }
+        await #expect(throws: ComposeError.self) {
+            _ = try await orch.exec(service: "nope", command: ["sh"])
+        }
     }
 }
 

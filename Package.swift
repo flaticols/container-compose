@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 // container-compose — Docker Compose compatibility layer for Apple's `container`.
 //
 // Ships as a CLI plugin for `container` (invoked as `container compose ...`)
@@ -17,6 +17,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+        .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.5.0"),
         // ComposeKit is the runtime-agnostic Compose parser, in its own repo.
         // Pinned to an exact tag — for a 0.0.x line every patch may break, and
         // `from:` would float up to <1.0.0. Bump this string when adopting a
@@ -29,7 +30,10 @@ let package = Package(
         // run/build args and orchestrates up/down/ps/logs/exec/pull/stop/start.
         .target(
             name: "ContainerComposeKit",
-            dependencies: [.product(name: "ComposeKit", package: "ComposeKit")],
+            dependencies: [
+                .product(name: "ComposeKit", package: "ComposeKit"),
+                .product(name: "Subprocess", package: "swift-subprocess"),
+            ],
             path: "Sources/ContainerComposeKit"
         ),
         .executableTarget(

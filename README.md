@@ -56,7 +56,7 @@ sudo installer -pkg container-compose-*.pkg -target /
 container system stop && container system start   # reload plugins
 ```
 
-**From source** (needs the Swift toolchain):
+**From source** (needs Swift 6.2 or newer):
 
 ```sh
 make                 # swift build -c release

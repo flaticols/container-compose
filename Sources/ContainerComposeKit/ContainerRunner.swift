@@ -17,12 +17,16 @@ public struct ContainerRunner: Sendable {
     public var verbose: Bool
     private let executable: String
 
-    /// Create a runner, resolving the executable from `CONTAINER_CLI` (or
-    /// `container` on `PATH`).
-    public init(dryRun: Bool = false, verbose: Bool = false) {
+    /// Create a runner, resolving the executable from an explicit override,
+    /// `CONTAINER_CLI`, or `container` on `PATH` (in that order).
+    public init(
+        dryRun: Bool = false, verbose: Bool = false, executable: String? = nil
+    ) {
         self.dryRun = dryRun
         self.verbose = verbose
-        self.executable = ProcessInfo.processInfo.environment["CONTAINER_CLI"] ?? "container"
+        self.executable = executable
+            ?? ProcessInfo.processInfo.environment["CONTAINER_CLI"]
+            ?? "container"
     }
 
     private func trace(_ args: [String]) {

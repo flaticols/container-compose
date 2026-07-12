@@ -183,9 +183,7 @@ struct FileObjectTests {
     }
 }
 
-// .serialized: these mutate the process-global CONTAINER_CLI env var.
-
-@Suite("Completed-successfully gating", .serialized)
+@Suite("Completed-successfully gating")
 struct OneShotTests {
     @Test("dry-run up completes for a stack using service_completed_successfully")
     func dryRunUp() throws {
@@ -204,14 +202,12 @@ struct OneShotTests {
         // Shim `container` that always exits non-zero; the one-shot `a` then
         // fails and `up` must throw dependencyFailed before `b` is created.
         let shim = FileManager.default.temporaryDirectory
-            .appendingPathComponent("container-fail-shim-\(getpid())")
+            .appendingPathComponent("container-fail-shim-\(UUID().uuidString)")
         try "#!/bin/sh\nexit 7\n".write(to: shim, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shim.path)
         defer { try? FileManager.default.removeItem(at: shim) }
 
-        setenv("CONTAINER_CLI", shim.path, 1)
-        let runner = ContainerRunner()  // captures the shim path at init
-        unsetenv("CONTAINER_CLI")
+        let runner = ContainerRunner(executable: shim.path)
 
         let yaml = """
             services:
@@ -256,28 +252,23 @@ struct BuildTests {
     }
 }
 
-// .serialized: mutates the process-global CONTAINER_CLI env var.
-
-@Suite("Lifecycle commands", .serialized)
+@Suite("Lifecycle commands")
 struct LifecycleTests {
     /// Run `body` against an Orchestrator whose `container` is a shim that records
     /// each invocation, and return the recorded command lines.
     private func capture(_ tag: String, _ body: (Orchestrator) throws -> Void) throws -> [String] {
         let dir = FileManager.default.temporaryDirectory
-        let log = dir.appendingPathComponent("ck-log-\(tag)-\(getpid()).txt")
-        let shim = dir.appendingPathComponent("ck-shim-\(tag)-\(getpid()).sh")
-        try? FileManager.default.removeItem(at: log)
+            .appendingPathComponent("ck-\(tag)-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("commands.txt")
+        let shim = dir.appendingPathComponent("container-shim")
         try "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '\(log.path)'\nexit 0\n"
             .write(to: shim, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shim.path)
-        defer {
-            try? FileManager.default.removeItem(at: shim)
-            try? FileManager.default.removeItem(at: log)
-        }
 
-        setenv("CONTAINER_CLI", shim.path, 1)
-        let runner = ContainerRunner()  // captures the shim path at init
-        unsetenv("CONTAINER_CLI")
+        let runner = ContainerRunner(executable: shim.path)
 
         let yaml = """
             services:

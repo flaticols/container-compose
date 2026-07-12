@@ -72,14 +72,22 @@ struct Update: AsyncParsableCommand {
 
     private func download(_ name: String, from url: URL) async throws -> URL {
         print("Downloading \(name) ...")
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (temporary, response) = try await URLSession.shared.download(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            try? FileManager.default.removeItem(at: temporary)
             throw Fail("download failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1))")
         }
-        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: dest)
-        try data.write(to: dest)
-        return dest
+
+        let filename = URL(fileURLWithPath: name).lastPathComponent
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-\(filename)")
+        do {
+            try FileManager.default.moveItem(at: temporary, to: destination)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
+            throw error
+        }
     }
 
     private func verifySignature(of pkg: URL) throws {

@@ -64,6 +64,7 @@ public struct Orchestrator: Sendable {
         let resolved = resolveFileObjects(selected: selected)
 
         let order = try Planner.startOrder(project.file.services).filter { selected.contains($0) }
+        var healthyDependencies = Set<String>()
         for name in order {
             guard let svc = project.file.services[name] else { continue }
             let image = try await imageForService(
@@ -71,7 +72,9 @@ public struct Orchestrator: Sendable {
             warnUnsupported(name: name, svc: svc)
 
             // Wait on any `depends_on: condition: service_healthy` dependencies.
-            try await gateDependencies(of: name, svc, selected: selected)
+            let newlyHealthy = try await gateDependencies(
+                of: name, svc, selected: selected, alreadyHealthy: healthyDependencies)
+            healthyDependencies.formUnion(newlyHealthy)
 
             // Recreate semantics: remove any stale container with the same name.
             let cname = translator.containerName(service: name, declared: svc.container_name)
@@ -100,14 +103,30 @@ public struct Orchestrator: Sendable {
     /// healthy. Services without a healthcheck are considered ready once created;
     /// one-shot (`service_completed_successfully`) services already ran to exit.
     private func waitUntilHealthy(order: [String], oneShot: Set<String>) async throws {
+        var checks: [(name: String, container: String, health: Healthcheck)] = []
         for name in order where !oneShot.contains(name) {
-            guard let svc = project.file.services[name], let hc = svc.healthcheck,
-                hc.disable != true, let test = hc.test,
+            guard let svc = project.file.services[name], let health = svc.healthcheck,
+                health.disable != true, let test = health.test,
                 HealthChecker.execArguments(for: test) != nil
             else { continue }
-            let cname = translator.containerName(service: name, declared: svc.container_name)
-            info("Waiting for '\(name)' to be healthy ...")
-            try await HealthChecker(runner: runner).waitHealthy(container: cname, health: hc)
+            checks.append(
+                (
+                    name,
+                    translator.containerName(service: name, declared: svc.container_name),
+                    health
+                ))
+        }
+
+        let checker = HealthChecker(runner: runner)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for check in checks {
+                info("Waiting for '\(check.name)' to be healthy ...")
+                group.addTask {
+                    try await checker.waitHealthy(
+                        container: check.container, health: check.health)
+                }
+            }
+            while let _ = try await group.next() {}
         }
     }
 
@@ -127,25 +146,49 @@ public struct Orchestrator: Sendable {
     }
 
     /// Block on `service_healthy` dependencies that were also selected for `up`.
+    /// Dependencies that passed an earlier gate are not polled again.
     private func gateDependencies(
-        of name: String, _ svc: Service, selected: Set<String>
-    ) async throws {
-        guard let deps = svc.depends_on else { return }
-        for dep in deps.names where selected.contains(dep) {
+        of name: String, _ svc: Service, selected: Set<String>,
+        alreadyHealthy: Set<String>
+    ) async throws -> Set<String> {
+        guard let deps = svc.depends_on else { return [] }
+        var checks: [(name: String, container: String, health: Healthcheck)] = []
+        for dep in deps.names where selected.contains(dep) && !alreadyHealthy.contains(dep) {
             guard deps.condition(for: dep) == "service_healthy" else { continue }
             guard let depSvc = project.file.services[dep] else { continue }
-            let depContainer = translator.containerName(service: dep, declared: depSvc.container_name)
-            if let hc = depSvc.healthcheck, hc.disable != true,
-                let test = hc.test, HealthChecker.execArguments(for: test) != nil
+            if let health = depSvc.healthcheck, health.disable != true,
+                let test = health.test, HealthChecker.execArguments(for: test) != nil
             {
-                info("Waiting for '\(dep)' to be healthy ...")
-                try await HealthChecker(runner: runner).waitHealthy(
-                    container: depContainer, health: hc)
+                checks.append(
+                    (
+                        dep,
+                        translator.containerName(
+                            service: dep, declared: depSvc.container_name),
+                        health
+                    ))
             } else {
                 warn(
                     "service '\(name)': depends_on '\(dep)' wants service_healthy but "
                         + "'\(dep)' defines no healthcheck; starting without gating")
             }
+        }
+
+        let checker = HealthChecker(runner: runner)
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            for check in checks {
+                info("Waiting for '\(check.name)' to be healthy ...")
+                group.addTask {
+                    try await checker.waitHealthy(
+                        container: check.container, health: check.health)
+                    return check.name
+                }
+            }
+
+            var healthy = Set<String>()
+            while let name = try await group.next() {
+                healthy.insert(name)
+            }
+            return healthy
         }
     }
 

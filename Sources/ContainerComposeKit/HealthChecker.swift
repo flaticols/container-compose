@@ -18,7 +18,7 @@ public struct HealthChecker: Sendable {
 
     /// Block until the container's healthcheck passes, or throw after the
     /// configured number of retries is exhausted.
-    public func waitHealthy(container: String, health: Healthcheck) throws {
+    public func waitHealthy(container: String, health: Healthcheck) async throws {
         guard let test = health.test, let execArgs = Self.execArguments(for: test) else {
             return  // no test / NONE => nothing to gate on
         }
@@ -28,16 +28,16 @@ public struct HealthChecker: Sendable {
         let retries = max(health.retries ?? 3, 1)
 
         if startPeriod > 0, !runner.dryRun {
-            Thread.sleep(forTimeInterval: startPeriod)
+            try await Task.sleep(for: .seconds(startPeriod))
         }
 
         var attempt = 0
         while true {
             attempt += 1
-            let (status, _) = try runner.capture(["exec", container] + execArgs)
+            let (status, _) = try await runner.capture(["exec", container] + execArgs)
             if status == 0 { return }
             if attempt >= retries { throw ComposeError.dependencyUnhealthy(container) }
-            if !runner.dryRun { Thread.sleep(forTimeInterval: interval) }
+            if !runner.dryRun { try await Task.sleep(for: .seconds(interval)) }
         }
     }
 

@@ -52,11 +52,11 @@ public struct Orchestrator: Sendable {
     ///     dependencies); empty means every profile-enabled service.
     /// - Throws: `ComposeError` for unknown services, dependency cycles, or a
     ///   dependency that fails to become healthy or complete successfully.
-    public func up(build: Bool, only services: [String], wait: Bool = false) throws {
+    public func up(build: Bool, only services: [String], wait: Bool = false) async throws {
         try validate(services)
         let selected = project.enabledServices(explicit: services)
-        try ensureNetworks()
-        try ensureVolumes()
+        try await ensureNetworks()
+        try await ensureVolumes()
 
         // Services that a selected service depends on with
         // `condition: service_completed_successfully` — run these to completion.
@@ -64,18 +64,21 @@ public struct Orchestrator: Sendable {
         let resolved = resolveFileObjects(selected: selected)
 
         let order = try Planner.startOrder(project.file.services).filter { selected.contains($0) }
+        var healthyDependencies = Set<String>()
         for name in order {
             guard let svc = project.file.services[name] else { continue }
-            let image = try imageForService(
+            let image = try await imageForService(
                 name: name, svc: svc, forceBuild: build, buildSecrets: resolved.secrets)
             warnUnsupported(name: name, svc: svc)
 
             // Wait on any `depends_on: condition: service_healthy` dependencies.
-            try gateDependencies(of: name, svc, selected: selected)
+            let newlyHealthy = try await gateDependencies(
+                of: name, svc, selected: selected, alreadyHealthy: healthyDependencies)
+            healthyDependencies.formUnion(newlyHealthy)
 
             // Recreate semantics: remove any stale container with the same name.
             let cname = translator.containerName(service: name, declared: svc.container_name)
-            runner.runSilently(["delete", "--force", cname])
+            try await runner.runSilently(["delete", "--force", cname])
 
             // One-shot dependency: run attached and use the exit code as the gate
             // (`container` has no `wait`); a non-zero exit aborts `up`. Topological
@@ -84,30 +87,46 @@ public struct Orchestrator: Sendable {
                 info("Running \(cname) (one-shot) ...")
                 let args = translator.runArgs(
                     service: name, svc, image: image, detach: false, files: resolved)
-                let status = try runner.run(args)
+                let status = try await runner.run(args)
                 if status != 0 { throw ComposeError.dependencyFailed(name, status) }
             } else {
                 info("Creating \(cname) ...")
-                try runner.runChecked(
+                try await runner.runChecked(
                     translator.runArgs(service: name, svc, image: image, files: resolved))
             }
         }
 
-        if wait { try waitUntilHealthy(order: order, oneShot: oneShot) }
+        if wait { try await waitUntilHealthy(order: order, oneShot: oneShot) }
     }
 
     /// Block until every started service that defines a healthcheck reports
     /// healthy. Services without a healthcheck are considered ready once created;
     /// one-shot (`service_completed_successfully`) services already ran to exit.
-    private func waitUntilHealthy(order: [String], oneShot: Set<String>) throws {
+    private func waitUntilHealthy(order: [String], oneShot: Set<String>) async throws {
+        var checks: [(name: String, container: String, health: Healthcheck)] = []
         for name in order where !oneShot.contains(name) {
-            guard let svc = project.file.services[name], let hc = svc.healthcheck,
-                hc.disable != true, let test = hc.test,
+            guard let svc = project.file.services[name], let health = svc.healthcheck,
+                health.disable != true, let test = health.test,
                 HealthChecker.execArguments(for: test) != nil
             else { continue }
-            let cname = translator.containerName(service: name, declared: svc.container_name)
-            info("Waiting for '\(name)' to be healthy ...")
-            try HealthChecker(runner: runner).waitHealthy(container: cname, health: hc)
+            checks.append(
+                (
+                    name,
+                    translator.containerName(service: name, declared: svc.container_name),
+                    health
+                ))
+        }
+
+        let checker = HealthChecker(runner: runner)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for check in checks {
+                info("Waiting for '\(check.name)' to be healthy ...")
+                group.addTask {
+                    try await checker.waitHealthy(
+                        container: check.container, health: check.health)
+                }
+            }
+            while let _ = try await group.next() {}
         }
     }
 
@@ -127,22 +146,49 @@ public struct Orchestrator: Sendable {
     }
 
     /// Block on `service_healthy` dependencies that were also selected for `up`.
-    private func gateDependencies(of name: String, _ svc: Service, selected: Set<String>) throws {
-        guard let deps = svc.depends_on else { return }
-        for dep in deps.names where selected.contains(dep) {
+    /// Dependencies that passed an earlier gate are not polled again.
+    private func gateDependencies(
+        of name: String, _ svc: Service, selected: Set<String>,
+        alreadyHealthy: Set<String>
+    ) async throws -> Set<String> {
+        guard let deps = svc.depends_on else { return [] }
+        var checks: [(name: String, container: String, health: Healthcheck)] = []
+        for dep in deps.names where selected.contains(dep) && !alreadyHealthy.contains(dep) {
             guard deps.condition(for: dep) == "service_healthy" else { continue }
             guard let depSvc = project.file.services[dep] else { continue }
-            let depContainer = translator.containerName(service: dep, declared: depSvc.container_name)
-            if let hc = depSvc.healthcheck, hc.disable != true,
-                let test = hc.test, HealthChecker.execArguments(for: test) != nil
+            if let health = depSvc.healthcheck, health.disable != true,
+                let test = health.test, HealthChecker.execArguments(for: test) != nil
             {
-                info("Waiting for '\(dep)' to be healthy ...")
-                try HealthChecker(runner: runner).waitHealthy(container: depContainer, health: hc)
+                checks.append(
+                    (
+                        dep,
+                        translator.containerName(
+                            service: dep, declared: depSvc.container_name),
+                        health
+                    ))
             } else {
                 warn(
                     "service '\(name)': depends_on '\(dep)' wants service_healthy but "
                         + "'\(dep)' defines no healthcheck; starting without gating")
             }
+        }
+
+        let checker = HealthChecker(runner: runner)
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            for check in checks {
+                info("Waiting for '\(check.name)' to be healthy ...")
+                group.addTask {
+                    try await checker.waitHealthy(
+                        container: check.container, health: check.health)
+                    return check.name
+                }
+            }
+
+            var healthy = Set<String>()
+            while let name = try await group.next() {
+                healthy.insert(name)
+            }
+            return healthy
         }
     }
 
@@ -251,13 +297,13 @@ public struct Orchestrator: Sendable {
 
     private func imageForService(
         name: String, svc: Service, forceBuild: Bool, buildSecrets: [String: String]
-    ) throws -> String {
+    ) async throws -> String {
         if svc.build != nil, forceBuild || svc.image == nil {
             if let buildArgs = translator.buildArgs(
                 service: name, svc, resolvedSecrets: buildSecrets)
             {
                 info("Building \(name) ...")
-                try runner.runChecked(buildArgs)
+                try await runner.runChecked(buildArgs)
             }
             return svc.image ?? translator.builtImageTag(service: name)
         }
@@ -274,27 +320,27 @@ public struct Orchestrator: Sendable {
     ///
     /// - Parameter removeVolumes: also delete the project's declared named
     ///   volumes (data loss); defaults to keeping them.
-    public func down(removeVolumes: Bool) throws {
+    public func down(removeVolumes: Bool) async throws {
         // Stop & remove in reverse dependency order.
         let order = try Planner.startOrder(project.file.services).reversed()
         for name in order {
             guard let svc = project.file.services[name] else { continue }
             let cname = translator.containerName(service: name, declared: svc.container_name)
             info("Removing \(cname) ...")
-            runner.runSilently(["stop", cname])
-            runner.runSilently(["delete", "--force", cname])
+            try await runner.runSilently(["stop", cname])
+            try await runner.runSilently(["delete", "--force", cname])
         }
 
         // Remove project networks (default + declared).
         var networks = [translator.defaultNetwork]
         networks += (project.file.networks ?? [:]).keys.map { translator.networkName($0) }
         for net in networks {
-            runner.runSilently(["network", "delete", net])
+            try await runner.runSilently(["network", "delete", net])
         }
 
         if removeVolumes {
             for volName in (project.file.volumes ?? [:]).keys {
-                runner.runSilently(["volume", "delete", translator.volumeName(volName)])
+                try await runner.runSilently(["volume", "delete", translator.volumeName(volName)])
             }
         }
     }
@@ -305,10 +351,10 @@ public struct Orchestrator: Sendable {
     /// prefix (the CLI's JSON schema is intentionally not depended upon).
     ///
     /// - Parameter all: include stopped containers (`container list --all`).
-    public func ps(all: Bool) throws {
+    public func ps(all: Bool) async throws {
         var args = ["list"]
         if all { args.append("--all") }
-        let (status, out) = try runner.capture(args)
+        let (status, out) = try await runner.capture(args)
         guard status == 0 else { throw ContainerRunner.RunnerError.nonZeroExit(command: args, status: status) }
 
         let prefix = "\(project.name)-"
@@ -335,7 +381,9 @@ public struct Orchestrator: Sendable {
     ///     one service this tails them sequentially; pass a single service to
     ///     stream live.
     ///   - services: limit to these services; empty means all.
-    public func logs(follow: Bool, tail: Int? = nil, only services: [String]) throws {
+    public func logs(
+        follow: Bool, tail: Int? = nil, only services: [String]
+    ) async throws {
         let selected = try select(services).sorted()
         if follow && selected.count > 1 {
             warn("--follow with multiple services tails them sequentially; pass one service to stream live")
@@ -347,7 +395,7 @@ public struct Orchestrator: Sendable {
             if follow { args.append("--follow") }
             if let tail { args += ["-n", String(tail)] }
             args.append(cname)
-            _ = try? runner.run(args)
+            _ = try? await runner.run(args)
         }
     }
 
@@ -370,7 +418,7 @@ public struct Orchestrator: Sendable {
     public func exec(
         service: String, command: [String], interactive: Bool = false, tty: Bool = false,
         workdir: String? = nil, user: String? = nil, env: [String] = []
-    ) throws -> Int32 {
+    ) async throws -> Int32 {
         try validate([service])
         let svc = project.file.services[service]
         let cname = translator.containerName(service: service, declared: svc?.container_name)
@@ -382,7 +430,7 @@ public struct Orchestrator: Sendable {
         for entry in env { args += ["--env", entry] }
         args.append(cname)
         args += command
-        return try runner.run(args)
+        return try await runner.run(args)
     }
 
     // MARK: - pull
@@ -391,7 +439,7 @@ public struct Orchestrator: Sendable {
     /// `image:`) and duplicate image references are skipped.
     ///
     /// - Parameter services: limit to these services; empty means all.
-    public func pull(only services: [String]) throws {
+    public func pull(only services: [String]) async throws {
         let selected = try select(services)
         var pulled = Set<String>()
         for name in selected.sorted() {
@@ -399,7 +447,7 @@ public struct Orchestrator: Sendable {
             else { continue }
             guard pulled.insert(image).inserted else { continue }
             info("Pulling \(image) ...")
-            try runner.runChecked(["image", "pull", image])
+            try await runner.runChecked(["image", "pull", image])
         }
     }
 
@@ -407,31 +455,31 @@ public struct Orchestrator: Sendable {
 
     /// Stop the selected services' containers (reverse dependency order) without
     /// removing them. Best-effort: an already-stopped container is ignored.
-    public func stop(only services: [String]) throws {
+    public func stop(only services: [String]) async throws {
         for name in try ordered(services, reversed: true) {
             guard let svc = project.file.services[name] else { continue }
             let cname = translator.containerName(service: name, declared: svc.container_name)
             info("Stopping \(cname) ...")
-            runner.runSilently(["stop", cname])
+            try await runner.runSilently(["stop", cname])
         }
     }
 
     /// Start previously-created containers for the selected services (dependency
     /// order) without recreating them.
-    public func start(only services: [String]) throws {
+    public func start(only services: [String]) async throws {
         for name in try ordered(services, reversed: false) {
             guard let svc = project.file.services[name] else { continue }
             let cname = translator.containerName(service: name, declared: svc.container_name)
             info("Starting \(cname) ...")
-            try runner.runChecked(["start", cname])
+            try await runner.runChecked(["start", cname])
         }
     }
 
     /// Restart the selected services (stop then start). `container` has no native
     /// restart command, so this is implemented as a stop followed by a start.
-    public func restart(only services: [String]) throws {
-        try stop(only: services)
-        try start(only: services)
+    public func restart(only services: [String]) async throws {
+        try await stop(only: services)
+        try await start(only: services)
     }
 
     /// Send a signal (default KILL) to the selected services' containers, in
@@ -439,7 +487,7 @@ public struct Orchestrator: Sendable {
     ///
     /// - Parameter signal: the signal to send (e.g. `SIGTERM`); `nil` uses the
     ///   `container` default (KILL).
-    public func kill(only services: [String], signal: String? = nil) throws {
+    public func kill(only services: [String], signal: String? = nil) async throws {
         for name in try ordered(services, reversed: true) {
             guard let svc = project.file.services[name] else { continue }
             let cname = translator.containerName(service: name, declared: svc.container_name)
@@ -447,7 +495,7 @@ public struct Orchestrator: Sendable {
             var args = ["kill"]
             if let signal { args += ["--signal", signal] }
             args.append(cname)
-            runner.runSilently(args)
+            try await runner.runSilently(args)
         }
     }
 
@@ -473,7 +521,7 @@ public struct Orchestrator: Sendable {
         return reversed ? order.reversed() : order
     }
 
-    private func ensureNetworks() throws {
+    private func ensureNetworks() async throws {
         var toCreate: [(name: String, spec: NetworkSpec?)] = [(translator.defaultNetwork, nil)]
         for (declared, spec) in project.file.networks ?? [:] {
             // External networks are assumed to already exist.
@@ -487,11 +535,11 @@ public struct Orchestrator: Sendable {
             args.append(name)
             // Best-effort and idempotent: an existing network is silently reused
             // (Docker-compatible). A genuine failure surfaces when `run` uses it.
-            runner.runSilently(args)
+            try await runner.runSilently(args)
         }
     }
 
-    private func ensureVolumes() throws {
+    private func ensureVolumes() async throws {
         // Declared top-level named volumes.
         var names = Set<String>()
         for (declared, spec) in project.file.volumes ?? [:] {
@@ -500,7 +548,7 @@ public struct Orchestrator: Sendable {
         }
         for name in names.sorted() {
             // Idempotent: an existing volume is reused.
-            runner.runSilently(["volume", "create", translator.volumeName(name)])
+            try await runner.runSilently(["volume", "create", translator.volumeName(name)])
         }
     }
 

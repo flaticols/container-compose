@@ -5,6 +5,7 @@
 // location and prompts for admin). Works regardless of how it was installed.
 
 import ArgumentParser
+import ContainerComposeKit
 import Foundation
 
 private let repoSlug = "flaticols/container-compose"
@@ -50,8 +51,8 @@ struct Update: AsyncParsableCommand {
         let pkg = try await download(asset.name, from: assetURL)
         defer { try? FileManager.default.removeItem(at: pkg) }
 
-        try verifySignature(of: pkg)
-        try install(pkg)
+        try await verifySignature(of: pkg)
+        try await install(pkg)
         print("Updated to \(latestTag). Run `container-compose --version` to confirm.")
     }
 
@@ -72,31 +73,41 @@ struct Update: AsyncParsableCommand {
 
     private func download(_ name: String, from url: URL) async throws -> URL {
         print("Downloading \(name) ...")
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (temporary, response) = try await URLSession.shared.download(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            try? FileManager.default.removeItem(at: temporary)
             throw Fail("download failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1))")
         }
-        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: dest)
-        try data.write(to: dest)
-        return dest
+
+        let filename = URL(fileURLWithPath: name).lastPathComponent
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-\(filename)")
+        do {
+            try FileManager.default.moveItem(at: temporary, to: destination)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
+            throw error
+        }
     }
 
-    private func verifySignature(of pkg: URL) throws {
+    private func verifySignature(of pkg: URL) async throws {
         // A signed, notarized .pkg makes `pkgutil --check-signature` exit 0.
-        let (status, _) = capture("/usr/sbin/pkgutil", ["--check-signature", pkg.path])
+        let runner = ContainerRunner(executable: "/usr/sbin/pkgutil")
+        let status = try await runner.runSilently(["--check-signature", pkg.path])
         guard status == 0 else {
             throw Fail("the downloaded .pkg is not signed/notarized; refusing to install")
         }
         print("Signature verified.")
     }
 
-    private func install(_ pkg: URL) throws {
+    private func install(_ pkg: URL) async throws {
         // Installing into /usr/local needs admin; `sudo installer` prompts in the
         // terminal and places the plugin where `container` looks for it.
         print("Installing (you may be prompted for your password) ...")
-        let status = runInheriting(
-            "/usr/bin/sudo", ["/usr/sbin/installer", "-pkg", pkg.path, "-target", "/"])
+        let runner = ContainerRunner(executable: "/usr/bin/sudo")
+        let status = try await runner.run(
+            ["/usr/sbin/installer", "-pkg", pkg.path, "-target", "/"])
         guard status == 0 else { throw Fail("installer exited with status \(status)") }
     }
 }
@@ -141,31 +152,7 @@ struct SemVer: Comparable {
     }
 }
 
-// MARK: - Process helpers
-
 private struct Fail: Error, CustomStringConvertible {
     let description: String
     init(_ message: String) { self.description = message }
-}
-
-private func runInheriting(_ launchPath: String, _ args: [String]) -> Int32 {
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: launchPath)
-    p.arguments = args
-    do { try p.run() } catch { return -1 }
-    p.waitUntilExit()
-    return p.terminationStatus
-}
-
-private func capture(_ launchPath: String, _ args: [String]) -> (status: Int32, output: String) {
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: launchPath)
-    p.arguments = args
-    let pipe = Pipe()
-    p.standardOutput = pipe
-    p.standardError = pipe
-    do { try p.run() } catch { return (-1, "") }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    p.waitUntilExit()
-    return (p.terminationStatus, String(data: data, encoding: .utf8) ?? "")
 }

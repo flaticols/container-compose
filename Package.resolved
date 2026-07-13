@@ -1,13 +1,13 @@
 {
-  "originHash" : "b00ccfe3bedf2001e50feb7651d12aeb65675a4a67face1d01831f1a03f79097",
+  "originHash" : "0839ee7480a769f38d32417692afe859f4283e7b573e253fb041109acbd9a861",
   "pins" : [
     {
       "identity" : "composekit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/flaticols/ComposeKit.git",
       "state" : {
-        "revision" : "bebaef274da3123db3c2f405dbbaf2e04d9486ad",
-        "version" : "0.0.3"
+        "revision" : "ded92ba664f622b714de14e86d283cebdf58ef8d",
+        "version" : "0.0.4"
       }
     },
     {
@@ -17,6 +17,24 @@
       "state" : {
         "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
         "version" : "1.8.2"
+      }
+    },
+    {
+      "identity" : "swift-subprocess",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-subprocess.git",
+      "state" : {
+        "revision" : "11633673a41f509f8945f23c96c7acd4adafd679",
+        "version" : "0.5.0"
+      }
+    },
+    {
+      "identity" : "swift-system",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-system",
+      "state" : {
+        "revision" : "b5544ba79a70a0cb3563e75bf26dc198d6b40ed3",
+        "version" : "1.7.4"
       }
     },
     {

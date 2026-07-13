@@ -24,7 +24,7 @@ struct Up: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.up(build: build, only: services, wait: wait)
+        try await orchestrator.up(build: build, only: services, wait: wait)
     }
 }
 
@@ -39,7 +39,7 @@ struct Down: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.down(removeVolumes: volumes)
+        try await orchestrator.down(removeVolumes: volumes)
     }
 }
 
@@ -54,7 +54,7 @@ struct Ps: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.ps(all: all)
+        try await orchestrator.ps(all: all)
     }
 }
 
@@ -76,7 +76,7 @@ struct Logs: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.logs(follow: follow, tail: tail, only: services)
+        try await orchestrator.logs(follow: follow, tail: tail, only: services)
     }
 }
 
@@ -109,7 +109,7 @@ struct Exec: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        let status = try orchestrator.exec(
+        let status = try await orchestrator.exec(
             service: service, command: command, interactive: interactive, tty: tty,
             workdir: workdir, user: user, env: env)
         if status != 0 { throw ExitCode(status) }
@@ -127,7 +127,7 @@ struct Pull: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.pull(only: services)
+        try await orchestrator.pull(only: services)
     }
 }
 
@@ -142,7 +142,7 @@ struct Stop: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.stop(only: services)
+        try await orchestrator.stop(only: services)
     }
 }
 
@@ -157,7 +157,7 @@ struct Start: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.start(only: services)
+        try await orchestrator.start(only: services)
     }
 }
 
@@ -172,7 +172,7 @@ struct Restart: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.restart(only: services)
+        try await orchestrator.restart(only: services)
     }
 }
 
@@ -190,7 +190,7 @@ struct Kill: AsyncParsableCommand {
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try orchestrator.kill(only: services, signal: signal)
+        try await orchestrator.kill(only: services, signal: signal)
     }
 }
 

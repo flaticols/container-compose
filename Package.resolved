@@ -6,7 +6,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/flaticols/ComposeKit.git",
       "state" : {
-        "revision" : "053e7693035bbbc4abb797503e7cfc81c2474ea7",
+        "revision" : "68bb824c3a2cf52633a2ccd781c3553867542d44",
         "version" : "0.0.5"
       }
     },

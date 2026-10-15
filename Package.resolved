@@ -1,13 +1,13 @@
 {
-  "originHash" : "0839ee7480a769f38d32417692afe859f4283e7b573e253fb041109acbd9a861",
+  "originHash" : "1cce34dafa08fc1e95dedce73ca1f417b696e2caf5690c7ea95c62748b45ad1a",
   "pins" : [
     {
       "identity" : "composekit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/flaticols/ComposeKit.git",
       "state" : {
-        "revision" : "ded92ba664f622b714de14e86d283cebdf58ef8d",
-        "version" : "0.0.4"
+        "revision" : "68bb824c3a2cf52633a2ccd781c3553867542d44",
+        "version" : "0.0.5"
       }
     },
     {

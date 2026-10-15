@@ -165,8 +165,8 @@ container compose update        <span class="c"># self-update to the latest rele
     <h2>Commands</h2>
     <p class="sub">The familiar Compose surface, mapped to native <code>container</code> operations.</p>
     <div class="grid">
-      <div class="card"><div class="cmd">up</div><div class="desc">Create networks &amp; volumes, start services in dependency order. <code>--wait</code> blocks until healthy.</div></div>
-      <div class="card"><div class="cmd">down</div><div class="desc">Stop and remove containers, networks, and named volumes.</div></div>
+      <div class="card"><div class="cmd">up</div><div class="desc">Create networks &amp; volumes, start services in dependency order. <code>--wait</code> blocks until healthy; <code>-d</code> accepted; <code>--remove-orphans</code> drops stale containers.</div></div>
+      <div class="card"><div class="cmd">down</div><div class="desc">Stop and remove containers, networks, and named volumes; <code>--remove-orphans</code> also removes containers of services no longer in the file.</div></div>
       <div class="card"><div class="cmd">ps</div><div class="desc">List the project&rsquo;s containers.</div></div>
       <div class="card"><div class="cmd">logs</div><div class="desc">Show or follow container logs; <code>--tail N</code> limits the output.</div></div>
       <div class="card"><div class="cmd">exec</div><div class="desc">Run a command in a running service container (<code>-it</code>, <code>--workdir/--user/--env</code>).</div></div>

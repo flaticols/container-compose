@@ -15,10 +15,15 @@ public struct Orchestrator: Sendable {
     public let runner: ContainerRunner
     /// The translator mapping services to `container` argument vectors.
     public let translator: ContainerTranslator
+    /// The per-container hosts files mounted into services for name resolution.
+    public let hosts: ProjectHosts
 
     /// Create an orchestrator for a loaded `Project`, wiring a
     /// ``ContainerTranslator`` from the project's identity and variables.
-    public init(project: Project, runner: ContainerRunner) {
+    ///
+    /// - Parameter stateDirectory: root for per-project state such as hosts
+    ///   files; defaults to ``ProjectHosts/defaultRoot(environment:)``.
+    public init(project: Project, runner: ContainerRunner, stateDirectory: URL? = nil) {
         self.project = project
         self.runner = runner
         self.translator = ContainerTranslator(
@@ -26,6 +31,10 @@ public struct Orchestrator: Sendable {
             baseDirectory: project.baseDirectory,
             hostEnv: project.variables
         )
+        let root = stateDirectory ?? ProjectHosts.defaultRoot()
+        self.hosts = ProjectHosts(
+            directory: root.appendingPathComponent(project.name, isDirectory: true)
+                .appendingPathComponent("hosts", isDirectory: true))
     }
 
     private func warn(_ message: String) {
@@ -50,13 +59,31 @@ public struct Orchestrator: Sendable {
     ///     section, even when an `image:` already exists.
     ///   - services: limit the operation to these services (and their
     ///     dependencies); empty means every profile-enabled service.
+    ///   - wait: block until every started service with a healthcheck is healthy.
+    ///   - removeOrphans: remove project containers whose service is no longer
+    ///     declared; otherwise they are only warned about.
     /// - Throws: `ComposeError` for unknown services, dependency cycles, or a
     ///   dependency that fails to become healthy or complete successfully.
-    public func up(build: Bool, only services: [String], wait: Bool = false) async throws {
+    public func up(
+        build: Bool, only services: [String], wait: Bool = false, removeOrphans: Bool = false
+    ) async throws {
         try validate(services)
         let selected = project.enabledServices(explicit: services)
         try await ensureNetworks()
         try await ensureVolumes()
+
+        var book = try await addressBook(for: selected)
+        let orphans = orphans(in: Array(book.records.values))
+        if !orphans.isEmpty {
+            if removeOrphans {
+                try await remove(orphans: orphans)
+                for orphan in orphans { book.records[orphan.id] = nil }
+            } else {
+                warn(
+                    "found orphan containers (\(orphans.map(\.id).sorted().joined(separator: ", "))) "
+                        + "for this project; remove them with `down --remove-orphans`")
+            }
+        }
 
         // Services that a selected service depends on with
         // `condition: service_completed_successfully` — run these to completion.
@@ -79,6 +106,11 @@ public struct Orchestrator: Sendable {
             // Recreate semantics: remove any stale container with the same name.
             let cname = translator.containerName(service: name, declared: svc.container_name)
             try await runner.runSilently(["delete", "--force", cname])
+            book.records[cname] = nil
+
+            // The hosts file must exist before `run` mounts it; it lists the
+            // peers started so far (all dependencies, by topological order).
+            let hostsFile = try writeHosts(service: name, svc, book: book)
 
             // One-shot dependency: run attached and use the exit code as the gate
             // (`container` has no `wait`); a non-zero exit aborts `up`. Topological
@@ -86,13 +118,16 @@ public struct Orchestrator: Sendable {
             if oneShot.contains(name) {
                 info("Running \(cname) (one-shot) ...")
                 let args = translator.runArgs(
-                    service: name, svc, image: image, detach: false, files: resolved)
+                    service: name, svc, image: image, detach: false, files: resolved,
+                    hostsFile: hostsFile)
                 let status = try await runner.run(args)
                 if status != 0 { throw ComposeError.dependencyFailed(name, status) }
             } else {
                 info("Creating \(cname) ...")
                 try await runner.runChecked(
-                    translator.runArgs(service: name, svc, image: image, files: resolved))
+                    translator.runArgs(
+                        service: name, svc, image: image, files: resolved, hostsFile: hostsFile))
+                try await noteStarted(cname, book: &book)
             }
         }
 
@@ -318,9 +353,12 @@ public struct Orchestrator: Sendable {
     /// Stop and remove the project's containers and networks (in reverse
     /// dependency order), optionally removing named volumes too.
     ///
-    /// - Parameter removeVolumes: also delete the project's declared named
-    ///   volumes (data loss); defaults to keeping them.
-    public func down(removeVolumes: Bool) async throws {
+    /// - Parameters:
+    ///   - removeVolumes: also delete the project's declared named volumes
+    ///     (data loss); defaults to keeping them.
+    ///   - removeOrphans: also remove project containers whose service is no
+    ///     longer declared in the Compose file.
+    public func down(removeVolumes: Bool, removeOrphans: Bool = false) async throws {
         // Stop & remove in reverse dependency order.
         let order = try Planner.startOrder(project.file.services).reversed()
         for name in order {
@@ -329,6 +367,14 @@ public struct Orchestrator: Sendable {
             info("Removing \(cname) ...")
             try await runner.runSilently(["stop", cname])
             try await runner.runSilently(["delete", "--force", cname])
+        }
+        if removeOrphans {
+            try await remove(orphans: orphans(in: try await projectContainers()))
+        }
+        do {
+            try hosts.remove()
+        } catch {
+            warn("could not remove hosts files at \(hosts.directory.path): \(error)")
         }
 
         // Remove project networks (default + declared).
@@ -465,13 +511,17 @@ public struct Orchestrator: Sendable {
     }
 
     /// Start previously-created containers for the selected services (dependency
-    /// order) without recreating them.
+    /// order) without recreating them. Containers get new addresses on start, so
+    /// the project's hosts files are refreshed as each one comes up.
     public func start(only services: [String]) async throws {
-        for name in try ordered(services, reversed: false) {
+        let order = try ordered(services, reversed: false)
+        var book = try await addressBook(for: Set(order))
+        for name in order {
             guard let svc = project.file.services[name] else { continue }
             let cname = translator.containerName(service: name, declared: svc.container_name)
             info("Starting \(cname) ...")
             try await runner.runChecked(["start", cname])
+            try await noteStarted(cname, book: &book)
         }
     }
 
@@ -521,6 +571,159 @@ public struct Orchestrator: Sendable {
         return reversed ? order.reversed() : order
     }
 
+    // MARK: - Name resolution & orphans
+
+    /// What is known about the project's containers while services start: their
+    /// records (by container name), the gateway of each network, and whether the
+    /// generated hosts files should carry the `host.docker.internal` entries.
+    private struct AddressBook {
+        var records: [String: ContainerRecord] = [:]
+        var gateways: [String: String] = [:]
+        var hostEntries = true
+
+        mutating func note(_ record: ContainerRecord) {
+            records[record.id] = record
+            for attachment in record.networks {
+                if let gateway = attachment.ipv4Gateway { gateways[attachment.network] = gateway }
+            }
+        }
+    }
+
+    /// Runtime network names a service attaches to, primary first.
+    private func runtimeNetworks(_ svc: Service) -> [String] {
+        let declared = svc.networks?.names ?? []
+        return declared.isEmpty ? [translator.defaultNetwork] : declared.map(translator.networkName)
+    }
+
+    /// Project containers known to `container`, in any state. Parse failures are
+    /// warned and treated as "none", so a schema change degrades name resolution
+    /// and orphan detection rather than aborting the command.
+    private func projectContainers() async throws -> [ContainerRecord] {
+        let (status, out) = try await runner.capture(["list", "--all", "--format", "json"])
+        guard status == 0 else { return [] }
+        do {
+            return try ContainerRecord.decodeList(out).filter { $0.project == project.name }
+        } catch {
+            warn("could not parse `container list` output (\(error)); "
+                + "service names and orphans may not be detected")
+            return []
+        }
+    }
+
+    /// Seed the address book from the project's containers in any state (a
+    /// stopped one has no addresses but still counts for orphan detection), the
+    /// gateways of every network the selected services use, and the registered
+    /// DNS domains.
+    private func addressBook(for selected: Set<String>) async throws -> AddressBook {
+        var book = AddressBook()
+        for record in try await projectContainers() {
+            book.note(record)
+        }
+
+        var wanted: [String] = []
+        for name in selected.sorted() {
+            guard let svc = project.file.services[name] else { continue }
+            for network in runtimeNetworks(svc) where book.gateways[network] == nil && !wanted.contains(network) {
+                wanted.append(network)
+            }
+        }
+        if !wanted.isEmpty {
+            let (status, out) = try await runner.capture(["network", "inspect"] + wanted)
+            if status == 0, let networks = try? NetworkRecord.decodeList(out) {
+                for network in networks {
+                    if let gateway = network.ipv4Gateway { book.gateways[network.id] = gateway }
+                }
+            }
+        }
+
+        // A user-registered `host.docker.internal` DNS domain (Apple's route to
+        // localhost-bound Mac services) must not be shadowed by /etc/hosts.
+        book.hostEntries = !(await registeredDNSDomains()).contains(ProjectHosts.hostNames[0])
+        return book
+    }
+
+    /// Domains registered with `container system dns create`; empty on any failure.
+    private func registeredDNSDomains() async -> Set<String> {
+        guard let (status, out) = try? await runner.capture(["system", "dns", "list", "--format", "json"]),
+            status == 0,
+            let domains = try? JSONDecoder().decode([String].self, from: Data(out.utf8))
+        else { return [] }
+        return Set(domains)
+    }
+
+    /// Peers for hosts rendering: every recorded container that runs a declared
+    /// service, under its service name, container name, and network aliases.
+    private func peers(in book: AddressBook) -> [ProjectHosts.Peer] {
+        var peers: [ProjectHosts.Peer] = []
+        for record in book.records.values {
+            guard let service = record.service, let svc = project.file.services[service] else { continue }
+            var aliases: [String: [String]] = [:]
+            for declared in svc.networks?.names ?? [] {
+                let names = svc.networks?.aliases(on: declared) ?? []
+                if !names.isEmpty { aliases[translator.networkName(declared)] = names }
+            }
+            var addresses: [String: String] = [:]
+            for attachment in record.networks {
+                if let ipv4 = attachment.ipv4 { addresses[attachment.network] = ipv4 }
+            }
+            let names = record.id == service ? [service] : [service, record.id]
+            peers.append(.init(names: names, aliases: aliases, addresses: addresses))
+        }
+        return peers
+    }
+
+    /// Render and write the hosts file for a service from the current address
+    /// book, returning its host path for `--volume`. Nothing is written during a
+    /// dry run.
+    private func writeHosts(service name: String, _ svc: Service, book: AddressBook) throws -> String {
+        let cname = translator.containerName(service: name, declared: svc.container_name)
+        let networks = runtimeNetworks(svc)
+        let content = ProjectHosts.render(
+            networks: networks, peers: peers(in: book),
+            gateway: networks.first.flatMap { book.gateways[$0] },
+            extraHosts: svc.extra_hosts?.entries ?? [],
+            hostEntries: book.hostEntries)
+        if !runner.dryRun { try hosts.write(content, for: cname) }
+        return hosts.path(for: cname)
+    }
+
+    /// Record a just-started container's addresses and rewrite the hosts files of
+    /// every running project container that shares a network with it (including
+    /// its own, which now gains a self entry).
+    private func noteStarted(_ cname: String, book: inout AddressBook) async throws {
+        if runner.dryRun { return }
+        let (status, out) = try await runner.capture(["inspect", cname])
+        guard status == 0, let record = try? ContainerRecord.decodeList(out).first else {
+            warn("could not inspect '\(cname)'; other services will not resolve it by name")
+            return
+        }
+        book.note(record)
+
+        let touched = Set(record.networks.map(\.network))
+        for peer in book.records.values where peer.isRunning {
+            guard let service = peer.service, let svc = project.file.services[service],
+                !touched.isDisjoint(with: runtimeNetworks(svc))
+            else { continue }
+            _ = try writeHosts(service: service, svc, book: book)
+        }
+    }
+
+    /// Project containers whose service label is missing or no longer declared.
+    private func orphans(in records: [ContainerRecord]) -> [ContainerRecord] {
+        records.filter { record in
+            guard let service = record.service else { return true }
+            return project.file.services[service] == nil
+        }
+    }
+
+    private func remove(orphans: [ContainerRecord]) async throws {
+        for orphan in orphans.sorted(by: { $0.id < $1.id }) {
+            info("Removing orphan \(orphan.id) ...")
+            try await runner.runSilently(["stop", orphan.id])
+            try await runner.runSilently(["delete", "--force", orphan.id])
+        }
+    }
+
     private func ensureNetworks() async throws {
         var toCreate: [(name: String, spec: NetworkSpec?)] = [(translator.defaultNetwork, nil)]
         for (declared, spec) in project.file.networks ?? [:] {
@@ -563,7 +766,6 @@ public struct Orchestrator: Sendable {
         // but flagged so the gap is visible rather than silently dropped.
         var ignored: [String] = []
         if svc.hostname != nil { ignored.append("hostname") }
-        if svc.extra_hosts != nil { ignored.append("extra_hosts") }
         if svc.network_mode != nil { ignored.append("network_mode") }
         if svc.devices != nil { ignored.append("devices") }
         if svc.sysctls != nil { ignored.append("sysctls") }

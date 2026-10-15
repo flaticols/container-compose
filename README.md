@@ -72,8 +72,8 @@ Run from a directory containing a `compose.yaml`:
 
 | Command | What it does |
 |---|---|
-| `up [--build] [--wait] [services…]` | Create networks/volumes and start services in dependency order; `--wait` blocks until healthchecked services are healthy |
-| `down [-v/--volumes]` | Stop + remove containers and project networks (and named volumes with `-v`) |
+| `up [-d] [--build] [--wait] [--remove-orphans] [services…]` | Create networks/volumes and start services in dependency order; `--wait` blocks until healthchecked services are healthy; `-d` is accepted (containers always run detached) |
+| `down [-v/--volumes] [--remove-orphans]` | Stop + remove containers and project networks (named volumes with `-v`; containers of services no longer in the file with `--remove-orphans`) |
 | `ps [-a/--all]` | List the project's containers |
 | `logs [-f/--follow] [-n/--tail N] [services…]` | Show container logs |
 | `exec [-i] [-t] [-w DIR] [-u USER] [-e K=V]… <service> <cmd…>` | Run a command in a running service container |
@@ -125,8 +125,9 @@ Supported and translated to `container run`/`build`/`network`/`volume`:
 | `environment`, `env_file` | `--env`, `--env-file` |
 | `ports` (short & long) | `--publish` |
 | `volumes` (named, bind, tmpfs; short & long) | `--volume` / `--tmpfs` |
-| `networks` (+ top-level, ipam subnet, internal) | `network create` + `--network` |
-| `depends_on` (incl. `condition: service_healthy` / `service_completed_successfully`) | start ordering + health/completion gating (see below) |
+| `networks` (+ top-level, ipam subnet, internal, service `aliases`) | `network create` + `--network`; names via a generated `/etc/hosts` (see below) |
+| `extra_hosts` (incl. `host-gateway`), `host.docker.internal` | entries in the generated `/etc/hosts` |
+| `depends_on` (incl. `condition: service_healthy` / `service_completed_successfully`, `required: false`) | start ordering + health/completion gating (see below) |
 | `profiles` | service gating via `--profile` / `COMPOSE_PROFILES` |
 | `extends`, `include` | flattened into the model at load time |
 | `configs`, `secrets` (file-based) | provisioned and mounted into containers |
@@ -152,6 +153,38 @@ dependency declares no `healthcheck`, we warn and start without gating.
 Resources are project-scoped: containers are named `<project>-<service>`, networks/volumes
 `<project>-<name>`, and tagged with `com.apple.container.compose.project/service` labels.
 
+### Service names & reaching the Mac
+
+`container` has no service DNS: containers do not resolve each other by name, and `--network`
+has no alias option. container-compose instead bind-mounts a generated hosts file over each
+service container's `/etc/hosts`, kept under `~/.local/state/container-compose/<project>/hosts/`
+(or `$XDG_STATE_HOME`). It lists every project container on a shared network under its
+service name, container name, and `networks.<net>.aliases`, and is rewritten in place as
+services start, so `redis` and `mongodb` resolve from other services. Containers get a new
+address on every start, so `start`/`restart` refresh the files too. Resolution of a peer that
+starts *after* you takes about a second to appear (virtiofs attribute caching).
+
+`host.docker.internal` and `gateway.docker.internal` resolve to the gateway of the service's
+network, which is the Mac. Listeners bound to `0.0.0.0` are reachable; listeners bound to
+`127.0.0.1` (the `kubectl port-forward` default) are **not** reachable through the gateway.
+For those, either bind the listener to all interfaces (`kubectl port-forward --address 0.0.0.0 …`)
+or register Apple's localhost redirect once:
+
+```sh
+sudo container system dns create host.docker.internal --localhost 203.0.113.113
+```
+
+When that domain is registered, container-compose leaves `host.docker.internal` to
+`container`'s DNS instead of writing it into `/etc/hosts`. The redirect disables iCloud
+Private Relay and its packet-filter rule does not survive a reboot (re-run the command).
+`extra_hosts: ["name:host-gateway"]` maps `name` to the same gateway address.
+
+### Profiles & optional dependencies
+
+A required `depends_on` (the default) pulls the dependency in even when its profile is
+inactive. With `depends_on: { name: { required: false } }` the dependency joins only when its
+own profile is active, so `--profile ui` does not drag in a `local-db`-gated service.
+
 ### Not yet / approximated (warns at runtime)
 
 - **`restart:` policy** — recorded as a label, **not enforced** (no `--restart` in `container`). The `restart` *command* (stop+start) works.
@@ -159,6 +192,7 @@ Resources are project-scoped: containers are named `<project>-<service>`, networ
 - **`command` as a string** — run via `/bin/sh -c` (Compose shell form).
 - **healthcheck `timeout`** — not enforced per-attempt (`container exec` has no timeout flag).
 - **`privileged`** — ignored (no equivalent in the VM-isolation model).
+- **`hostname`**, **`network_mode`** — no `container run` equivalent; ignored.
 - Multiple `-f` files / overrides, replicas/`scale` — not implemented.
 
 ## License

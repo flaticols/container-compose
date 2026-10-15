@@ -4,6 +4,10 @@ import Testing
 import ComposeKit
 @testable import ContainerComposeKit
 
+/// Keeps hosts files written by tests out of the real per-user state directory.
+let testStateDirectory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("container-compose-tests-state", isDirectory: true)
+
 private func loadFixture() throws -> Project {
     let url = Bundle.module.url(forResource: "compose", withExtension: "yaml", subdirectory: "Fixtures")!
     let dir = url.deletingLastPathComponent()
@@ -193,7 +197,7 @@ struct OneShotTests {
             forResource: "local-dev", withExtension: "yaml", subdirectory: "Fixtures/corpus")!
         let project = try Project.load(
             explicit: url.path, projectName: nil, cwd: url.deletingLastPathComponent())
-        let orch = Orchestrator(project: project, runner: ContainerRunner(dryRun: true))
+        let orch = Orchestrator(project: project, runner: ContainerRunner(dryRun: true), stateDirectory: testStateDirectory)
         try await orch.up(build: false, only: [])
     }
 
@@ -223,7 +227,7 @@ struct OneShotTests {
         let project = Project(
             name: "t", file: try ComposeFile.parse(yaml: yaml),
             baseDirectory: URL(fileURLWithPath: "/tmp"), variables: [:])
-        let orch = Orchestrator(project: project, runner: runner)
+        let orch = Orchestrator(project: project, runner: runner, stateDirectory: testStateDirectory)
 
         do {
             try await orch.up(build: false, only: [])
@@ -283,7 +287,7 @@ struct LifecycleTests {
         let project = Project(
             name: "proj", file: try ComposeFile.parse(yaml: yaml),
             baseDirectory: URL(fileURLWithPath: "/tmp"), variables: [:])
-        try await body(Orchestrator(project: project, runner: runner))
+        try await body(Orchestrator(project: project, runner: runner, stateDirectory: testStateDirectory))
         let text = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
         return text.split(separator: "\n").map(String.init)
     }
@@ -406,7 +410,7 @@ struct OrchestratorErrorTests {
     @Test("up on a service with neither image nor build throws serviceMissingImage")
     func missingImage() async throws {
         let orch = Orchestrator(
-            project: try project("services:\n  x: {}\n"), runner: ContainerRunner(dryRun: true))
+            project: try project("services:\n  x: {}\n"), runner: ContainerRunner(dryRun: true), stateDirectory: testStateDirectory)
         await #expect(throws: ComposeError.self) {
             try await orch.up(build: false, only: [])
         }
@@ -416,7 +420,7 @@ struct OrchestratorErrorTests {
     func unknownExec() async throws {
         let orch = Orchestrator(
             project: try project("services:\n  a:\n    image: x\n"),
-            runner: ContainerRunner(dryRun: true))
+            runner: ContainerRunner(dryRun: true), stateDirectory: testStateDirectory)
         await #expect(throws: ComposeError.self) {
             _ = try await orch.exec(service: "nope", command: ["sh"])
         }

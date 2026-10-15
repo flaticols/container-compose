@@ -610,11 +610,13 @@ public struct Orchestrator: Sendable {
         }
     }
 
-    /// Seed the address book from the containers already running, the gateways
-    /// of every network the selected services use, and the registered DNS domains.
+    /// Seed the address book from the project's containers in any state (a
+    /// stopped one has no addresses but still counts for orphan detection), the
+    /// gateways of every network the selected services use, and the registered
+    /// DNS domains.
     private func addressBook(for selected: Set<String>) async throws -> AddressBook {
         var book = AddressBook()
-        for record in try await projectContainers() where record.isRunning {
+        for record in try await projectContainers() {
             book.note(record)
         }
 

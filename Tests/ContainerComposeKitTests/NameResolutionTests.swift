@@ -144,7 +144,7 @@ struct NameResolutionOrchestrationTests {
                 printf '%s\\n' "$*" >> '\(log.path)'
                 case "$1" in
                   list)
-                    printf '[\(record),\(record)]\\n' old proj-old 192.168.64.9 db proj-db 192.168.64.2 ;;
+                    printf '[\(record),\(record),{"configuration":{\(labels)},"id":"proj-stale","status":{"state":"stopped","networks":[]}}]\\n' old proj-old 192.168.64.9 db proj-db 192.168.64.2 stale ;;
                   inspect)
                     case "$2" in
                       proj-db) printf '[\(record)]\\n' db proj-db 192.168.64.2 ;;
@@ -221,12 +221,14 @@ struct NameResolutionOrchestrationTests {
         defer { keep.tearDown() }
         try await keep.orchestrator(stack).up(build: false, only: [])
         #expect(!keep.commands.contains("delete --force proj-old"))
+        #expect(!keep.commands.contains("delete --force proj-stale"))
 
         let remove = try Harness(tag: "orphan-remove")
         defer { remove.tearDown() }
         try await remove.orchestrator(stack).up(build: false, only: [], removeOrphans: true)
         #expect(remove.commands.contains("stop proj-old"))
         #expect(remove.commands.contains("delete --force proj-old"))
+        #expect(remove.commands.contains("delete --force proj-stale"))  // stopped orphans count too
     }
 
     @Test("down --remove-orphans removes orphans and the hosts files")

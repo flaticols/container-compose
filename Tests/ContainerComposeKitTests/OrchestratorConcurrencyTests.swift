@@ -27,7 +27,7 @@ struct OrchestratorConcurrencyTests {
                       retries: 1
                 """)
             let orchestrator = Orchestrator(
-                project: project, runner: ContainerRunner(executable: runner.shim.path))
+                project: project, runner: ContainerRunner(executable: runner.shim.path), stateDirectory: testStateDirectory)
 
             try await orchestrator.up(build: false, only: [], wait: true)
         }
@@ -61,7 +61,7 @@ struct OrchestratorConcurrencyTests {
                         condition: service_healthy
                 """)
             let orchestrator = Orchestrator(
-                project: project, runner: ContainerRunner(executable: runner.shim.path))
+                project: project, runner: ContainerRunner(executable: runner.shim.path), stateDirectory: testStateDirectory)
 
             try await orchestrator.up(build: false, only: [], wait: false)
         }
@@ -99,7 +99,7 @@ struct OrchestratorConcurrencyTests {
                         condition: service_healthy
                 """)
             let orchestrator = Orchestrator(
-                project: project, runner: ContainerRunner(executable: runner.shim.path))
+                project: project, runner: ContainerRunner(executable: runner.shim.path), stateDirectory: testStateDirectory)
 
             try await orchestrator.up(build: false, only: [], wait: false)
 

@@ -19,7 +19,7 @@ target — it is no longer a `ComposeKitContainer` product of ComposeKit.
 `Package.swift` pins ComposeKit to an exact tag:
 
 ```swift
-.package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.3"),
+.package(url: "https://github.com/flaticols/ComposeKit.git", exact: "0.0.5"),
 ```
 
 `0.0.3` is the first ComposeKit release after the runtime layer was extracted

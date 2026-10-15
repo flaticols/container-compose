@@ -1,7 +1,3 @@
-//===----------------------------------------------------------------------===//
-// Subcommands: up, down, ps, logs, config.
-//===----------------------------------------------------------------------===//
-
 import ArgumentParser
 import ComposeKit
 import ContainerComposeKit
@@ -19,12 +15,20 @@ struct Up: AsyncParsableCommand {
     @Flag(name: .long, help: "Wait until services with a healthcheck report healthy.")
     var wait = false
 
+    // Containers always run detached; accepted so `up -d` from Docker habits works.
+    @Flag(name: [.customShort("d"), .long], help: "Detached mode (always on; accepted for compatibility).")
+    var detach = false
+
+    @Flag(name: .long, help: "Remove containers for services no longer declared in the Compose file.")
+    var removeOrphans = false
+
     @Argument(help: "Limit to these services (default: all).")
     var services: [String] = []
 
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try await orchestrator.up(build: build, only: services, wait: wait)
+        try await orchestrator.up(
+            build: build, only: services, wait: wait, removeOrphans: removeOrphans)
     }
 }
 
@@ -37,9 +41,12 @@ struct Down: AsyncParsableCommand {
     @Flag(name: [.customShort("v"), .long], help: "Also remove named volumes declared in the file.")
     var volumes = false
 
+    @Flag(name: .long, help: "Also remove containers for services no longer declared in the Compose file.")
+    var removeOrphans = false
+
     func run() async throws {
         let orchestrator = try options.makeOrchestrator()
-        try await orchestrator.down(removeVolumes: volumes)
+        try await orchestrator.down(removeVolumes: volumes, removeOrphans: removeOrphans)
     }
 }
 
@@ -216,7 +223,8 @@ struct Config: AsyncParsableCommand {
         print("services:  \(services.keys.sorted().joined(separator: ", "))")
         print("start order:")
         for (i, name) in order.enumerated() {
-            let deps = project.file.services[name]?.depends_on?.names ?? []
+            // Optional (`required: false`) dependencies outside the plan are not started.
+            let deps = (project.file.services[name]?.depends_on?.names ?? []).filter(enabled.contains)
             let suffix = deps.isEmpty ? "" : "  (after: \(deps.sorted().joined(separator: ", ")))"
             print("  \(i + 1). \(name)\(suffix)")
         }

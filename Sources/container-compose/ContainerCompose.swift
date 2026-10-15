@@ -1,15 +1,10 @@
-//===----------------------------------------------------------------------===//
-// container-compose — entry point.
-//
-// Invoked either standalone (`container-compose up`) or as a `container` CLI
-// plugin (`container compose up`, which execs this binary).
-//===----------------------------------------------------------------------===//
-
 import ArgumentParser
 import ComposeKit
 import ContainerComposeKit
 import Foundation
 
+/// Entry point. Invoked either standalone (`container-compose up`) or as a
+/// `container` CLI plugin (`container compose up`, which execs this binary).
 @main
 struct ContainerCompose: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

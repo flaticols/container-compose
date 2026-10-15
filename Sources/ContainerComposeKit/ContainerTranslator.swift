@@ -108,10 +108,12 @@ public struct ContainerTranslator: Sendable {
     ///   - detach: run in the background (`--detach`). One-shot dependencies
     ///     gated by `service_completed_successfully` are run attached (`false`).
     ///   - files: resolved host paths for the service's configs/secrets.
+    ///   - hostsFile: host path of the generated hosts file to mount over
+    ///     `/etc/hosts` (see ``ProjectHosts``); `nil` keeps the runtime's own.
     /// - Returns: the argument vector following the `container` executable.
     public func runArgs(
         service name: String, _ svc: Service, image: String,
-        detach: Bool = true, files: ResolvedFileObjects = .none
+        detach: Bool = true, files: ResolvedFileObjects = .none, hostsFile: String? = nil
     ) -> [String] {
         var a = ["run"]
         if detach { a += ["--detach"] }
@@ -142,6 +144,7 @@ public struct ContainerTranslator: Sendable {
         if let vols = svc.volumes {
             for v in vols { a += volumeArguments(v) }
         }
+        if let hostsFile { a += ["--volume", "\(hostsFile):/etc/hosts"] }
 
         // Networks (attach to project default when none declared).
         let nets = svc.networks?.names ?? []
